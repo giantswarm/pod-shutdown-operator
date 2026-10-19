@@ -30,3 +30,15 @@ func replicasAndSelector(obj client.Object) (*int32, *metav1.LabelSelector) {
 	}
 	return nil, nil
 }
+
+// workloadReady returns true when the controller of an object from newScalable has seen its current
+// generation, and want replicas are available (Deployment) or ready (StatefulSet).
+func workloadReady(obj client.Object, want int32) bool {
+	switch o := obj.(type) {
+	case *appsv1.Deployment:
+		return o.Status.ObservedGeneration >= o.Generation && o.Status.AvailableReplicas >= want
+	case *appsv1.StatefulSet:
+		return o.Status.ObservedGeneration >= o.Generation && o.Status.ReadyReplicas >= want
+	}
+	return false
+}

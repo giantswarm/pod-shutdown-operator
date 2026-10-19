@@ -17,7 +17,7 @@ type Config struct {
 	// metrics, and probes. NewManager sets the scheme.
 	Manager ctrl.Options
 
-	// PollInterval is the requeue interval while pods end.
+	// PollInterval is the requeue interval while pods end and while workloads become ready.
 	PollInterval time.Duration
 
 	// FieldOwner is the field manager name of each write that the operator sends.

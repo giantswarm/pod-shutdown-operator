@@ -33,7 +33,7 @@ func main() {
 		"Enable leader election. Only the lease holder acts on a ShutdownRequest.")
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "",
 		"The namespace of the leader election lease. Empty means the namespace of the pod.")
-	flag.DurationVar(&pollInterval, "poll-interval", 2*time.Second, "The interval between checks while pods end.")
+	flag.DurationVar(&pollInterval, "poll-interval", 2*time.Second, "The interval between checks while pods end and while workloads become ready.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

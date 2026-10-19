@@ -10,7 +10,7 @@ This command writes `zz_generated.deepcopy.go`, the CRDs in `config/crd/bases`, 
 
 ## Run the tests
 
-The behavior tests use `envtest`. `envtest` starts a real API server and etcd, but no other Kubernetes controller. The tests play the Deployment, StatefulSet, and kubelet controllers: they create and delete Pods by hand.
+The behavior tests use `envtest`. `envtest` starts a real API server and etcd, but no other Kubernetes controller. The tests play the Deployment, StatefulSet, and kubelet controllers: they create and delete Pods, and set the workload status, by hand.
 
     make test-envtest
 

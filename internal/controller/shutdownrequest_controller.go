@@ -15,8 +15,11 @@ import (
 type ShutdownRequestReconciler struct {
 	Client client.Client
 
-	// PollInterval is the requeue interval while pods end.
+	// PollInterval is the requeue interval while pods end and while workloads become ready.
 	PollInterval time.Duration
+
+	// scaleUp has no lock. One worker reconciles the request, because it is the only object.
+	scaleUp scaleUpState
 }
 
 // +kubebuilder:rbac:groups=shutdown.giantswarm.io,resources=shutdownrequests,verbs=get;list;watch
@@ -35,10 +38,15 @@ func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	switch {
+	case request.Spec.Action == shutdownv1alpha1.ActionCancel &&
+		(request.Status.Phase == shutdownv1alpha1.PhaseShuttingDown || request.Status.Phase == shutdownv1alpha1.PhaseComplete):
+		return ctrl.Result{}, r.startScaleUp(ctx, &request)
 	case request.Status.Phase == "" && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
 		return ctrl.Result{}, r.startShutdown(ctx, &request)
 	case request.Status.Phase == shutdownv1alpha1.PhaseShuttingDown:
 		return r.continueShutdown(ctx, &request)
+	case request.Status.Phase == shutdownv1alpha1.PhaseScalingUp:
+		return r.continueScaleUp(ctx, &request)
 	}
 	return ctrl.Result{}, nil
 }
