@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"os"
 	"time"
@@ -11,7 +10,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
@@ -26,18 +24,15 @@ var setupLog = ctrl.Log.WithName("setup")
 
 func main() {
 	var metricsAddr, probeAddr, leaderElectionNamespace string
-	var enableLeaderElection, secureMetrics, enableHTTP2 bool
+	var enableLeaderElection bool
 	var pollInterval time.Duration
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the metrics endpoint. "+
-		"Use :8443 for HTTPS or :8080 for HTTP. The value 0 disables the metrics endpoint.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
+		"The endpoint has no authentication, so keep it inside the cluster. The value 0 disables the metrics endpoint.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address of the probe endpoint.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election. Only the lease holder acts on a ShutdownRequest.")
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "",
 		"The namespace of the leader election lease. Empty means the namespace of the pod.")
-	flag.BoolVar(&secureMetrics, "metrics-secure", true,
-		"Serve the metrics endpoint with HTTPS. Use --metrics-secure=false for HTTP.")
-	flag.BoolVar(&enableHTTP2, "enable-http2", false, "Enable HTTP/2 for the metrics endpoint.")
 	flag.DurationVar(&pollInterval, "poll-interval", 2*time.Second, "The interval between checks while pods end.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -45,23 +40,9 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	var tlsOpts []func(*tls.Config)
-	if !enableHTTP2 {
-		// HTTP/2 is off by default because of the HTTP/2 Stream Cancellation and Rapid Reset CVEs.
-		tlsOpts = append(tlsOpts, func(c *tls.Config) { c.NextProtos = []string{"http/1.1"} })
-	}
-	metricsOptions := metricsserver.Options{
-		BindAddress:   metricsAddr,
-		SecureServing: secureMetrics,
-		TLSOpts:       tlsOpts,
-	}
-	if secureMetrics {
-		metricsOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
-	}
-
 	mgr, err := operator.NewManager(ctrl.GetConfigOrDie(), operator.Config{
 		Manager: ctrl.Options{
-			Metrics:                 metricsOptions,
+			Metrics:                 metricsserver.Options{BindAddress: metricsAddr},
 			HealthProbeBindAddress:  probeAddr,
 			LeaderElection:          enableLeaderElection,
 			LeaderElectionID:        leaderElectionID,
