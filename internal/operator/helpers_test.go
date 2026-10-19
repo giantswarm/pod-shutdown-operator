@@ -102,6 +102,14 @@ func createPod(ns, name string, labels map[string]string) {
 	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 }
 
+// setPodPhase sets the phase of a Pod in the place of the kubelet.
+func setPodPhase(ns, name string, phase corev1.PodPhase) {
+	pod := &corev1.Pod{}
+	Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, pod)).To(Succeed())
+	pod.Status.Phase = phase
+	Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+}
+
 // deletePod ends a Pod. A Pod with no node is deleted at once.
 func deletePod(ns, name string) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}

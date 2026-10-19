@@ -76,7 +76,7 @@ func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace 
 	return r.podsEnded(ctx, namespace, selector)
 }
 
-// podsEnded returns true when no Pod in the namespace matches the selector.
+// podsEnded returns true when no Pod in the namespace that matches the selector is in a non-terminal phase.
 func (r *ShutdownRequestReconciler) podsEnded(ctx context.Context, namespace string, selector *metav1.LabelSelector) (bool, error) {
 	s, err := metav1.LabelSelectorAsSelector(selector)
 	if err != nil {
@@ -86,5 +86,11 @@ func (r *ShutdownRequestReconciler) podsEnded(ctx context.Context, namespace str
 	if err := r.Client.List(ctx, &pods, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: s}); err != nil {
 		return false, fmt.Errorf("list pods in %s: %w", namespace, err)
 	}
-	return len(pods.Items) == 0, nil
+	for _, pod := range pods.Items {
+		// A Pod in a terminal phase has no running container, and the scale to 0 does not delete it.
+		if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
+			return false, nil
+		}
+	}
+	return true, nil
 }

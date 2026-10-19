@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/utils/ptr"
@@ -166,6 +167,21 @@ var _ = Describe("A basic shutdown", func() {
 		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseShuttingDown))
 
 		deletePod(ns, "idle-0")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+	})
+
+	It("counts a Pod in a terminal phase as ended", func() {
+		// The scale to 0 does not delete a Failed Pod (for example an evicted Pod)
+		// or a Succeeded Pod. They have no running container.
+		createDeployment(ns, "web", 2)
+		createPod(ns, "web-0", appLabels("web"))
+		setPodPhase(ns, "web-0", corev1.PodFailed)
+		createPod(ns, "web-1", appLabels("web"))
+		setPodPhase(ns, "web-1", corev1.PodSucceeded)
+		createApplication(ns, "shop", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+
 		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
 	})
 

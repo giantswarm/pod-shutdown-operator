@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,6 +31,9 @@ var (
 
 func TestOperator(t *testing.T) {
 	RegisterFailHandler(Fail)
+	// The first use of a resource type in a new API server takes some seconds:
+	// the informer must sync. The default timeout of 1s is too short for that.
+	SetDefaultEventuallyTimeout(10 * time.Second)
 	RunSpecs(t, "Operator Suite")
 }
 
