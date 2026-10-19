@@ -1,0 +1,12 @@
+# This file is a Helm values file for the pod-shutdown-operator chart.
+#
+# To learn more about how to configure your app on your cluster
+# and override the default values in here, visit:
+#
+#   https://docs.giantswarm.io/tutorials/fleet-management/app-platform/app-configuration/#basic-values-merging-example
+#
+image:
+  name: "giantswarm/pod-shutdown-operator"
+  tag: ""
+registry:
+  domain: gsoci.azurecr.io

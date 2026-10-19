@@ -1,0 +1,5 @@
+replace-chart-version-with-git: true
+generate-metadata: true
+chart-dir: ./helm/pod-shutdown-operator
+destination: ./build
+helm-template-extra-values: ./helm/pod-shutdown-operator/ci/ci-values.yaml
