@@ -1,0 +1,239 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: shutdownrequests.shutdown.giantswarm.io
+spec:
+  group: shutdown.giantswarm.io
+  names:
+    kind: ShutdownRequest
+    listKind: ShutdownRequestList
+    plural: shutdownrequests
+    singular: shutdownrequest
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.stopped
+      name: Stopped
+      type: integer
+    - jsonPath: .status.total
+      name: Total
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ShutdownRequest is the latest shutdown event of the cluster.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ShutdownRequestSpec holds the intent of the caller and the
+              time budget.
+            properties:
+              action:
+                description: Action is the intent of the caller.
+                enum:
+                - Shutdown
+                - Cancel
+                type: string
+              budget:
+                default: 10m
+                description: Budget is the time from the start of the shutdown to
+                  the node power-off.
+                type: string
+              safetyMargin:
+                default: 30s
+                description: SafetyMargin is the time at the end of the budget that
+                  the operator keeps free.
+                type: string
+            required:
+            - action
+            type: object
+          status:
+            description: ShutdownRequestStatus is the state of the shutdown event.
+              Only the leader writes it.
+            properties:
+              bootIDs:
+                additionalProperties:
+                  type: string
+                description: BootIDs holds the boot ID of each node by node name.
+                type: object
+              degraded:
+                description: Degraded lists the applications (namespace/name) that
+                  did not become ready at scale-up.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              failed:
+                description: Failed lists the applications (namespace/name) whose
+                  patch the API server rejected.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              phase:
+                description: Phase is the phase of a ShutdownRequest.
+                enum:
+                - ShuttingDown
+                - Complete
+                - ScalingUp
+                - Restored
+                type: string
+              reason:
+                description: Reason tells why the request has its phase, for example
+                  Stale.
+                type: string
+              recordedState:
+                description: RecordedState is the record that the operator writes
+                  once, before it changes a workload.
+                properties:
+                  applications:
+                    items:
+                      description: RecordedApplication is the state of the workloads
+                        of one ManagedApplication at the start of a shutdown.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        workloads:
+                          description: Workloads are the listed workloads that existed
+                            at the start of the shutdown.
+                          items:
+                            description: RecordedWorkload is the state of one workload
+                              at the start of a shutdown.
+                            properties:
+                              kind:
+                                description: WorkloadKind is the kind of a workload
+                                  that a ManagedApplication lists.
+                                enum:
+                                - Deployment
+                                - StatefulSet
+                                - VirtualMachine
+                                - CronJob
+                                type: string
+                              name:
+                                type: string
+                              replicas:
+                                description: Replicas is the replica count of a Deployment
+                                  or a StatefulSet.
+                                format: int32
+                                type: integer
+                              runStrategy:
+                                description: RunStrategy is the run strategy of a
+                                  VirtualMachine that uses it.
+                                type: string
+                              running:
+                                description: Running is the running field of a VirtualMachine
+                                  that uses it.
+                                type: boolean
+                              suspend:
+                                description: Suspend is the original suspend value
+                                  of a CronJob.
+                                type: boolean
+                            required:
+                            - kind
+                            - name
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  fluxControllers:
+                    items:
+                      description: RecordedFluxController is the replica count of
+                        one Flux controller Deployment at the start of a shutdown.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                        replicas:
+                          format: int32
+                          type: integer
+                      required:
+                      - name
+                      - namespace
+                      - replicas
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              scaleUpStartedAt:
+                format: date-time
+                type: string
+              shutdownStartedAt:
+                format: date-time
+                type: string
+              stopped:
+                description: Stopped is the number of applications that have stopped.
+                format: int32
+                type: integer
+              total:
+                description: Total is the number of applications in the record.
+                format: int32
+                type: integer
+              unmanaged:
+                items:
+                  description: UnmanagedWorkload is a workload with replicas above
+                    0 that no ManagedApplication lists.
+                  properties:
+                    kind:
+                      description: WorkloadKind is the kind of a workload that a ManagedApplication
+                        lists.
+                      enum:
+                      - Deployment
+                      - StatefulSet
+                      - VirtualMachine
+                      - CronJob
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  - namespace
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: the name must be cluster
+          rule: self.metadata.name == 'cluster'
+    served: true
+    storage: true
+    subresources:
+      status: {}

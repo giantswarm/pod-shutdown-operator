@@ -1,0 +1,95 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: managedapplications.shutdown.giantswarm.io
+spec:
+  group: shutdown.giantswarm.io
+  names:
+    kind: ManagedApplication
+    listKind: ManagedApplicationList
+    plural: managedapplications
+    singular: managedapplication
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ManagedApplication declares an application that the operator
+          stops at a shutdown and starts at power-on.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ManagedApplicationSpec holds the workloads, the dependencies,
+              and the time limits of an application.
+            properties:
+              dependsOn:
+                description: |-
+                  DependsOn names the applications that this application depends on.
+                  A name in another namespace has the form namespace/name.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
+              gracePeriod:
+                default: 30s
+                description: GracePeriod is the time that the application gets to
+                  stop.
+                type: string
+              readyTimeout:
+                default: 5m
+                description: ReadyTimeout is the time that the application gets to
+                  become ready at scale-up.
+                type: string
+              workloads:
+                description: Workloads are the workloads of the application. They
+                  are in the namespace of the resource.
+                items:
+                  description: WorkloadReference names a workload in the namespace
+                    of the ManagedApplication.
+                  properties:
+                    kind:
+                      description: Kind is the kind of the workload.
+                      enum:
+                      - Deployment
+                      - StatefulSet
+                      - VirtualMachine
+                      - CronJob
+                      type: string
+                    name:
+                      description: Name is the name of the workload.
+                      minLength: 1
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-type: atomic
+            required:
+            - workloads
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
