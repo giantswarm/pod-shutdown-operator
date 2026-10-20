@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -178,4 +179,51 @@ func cleanUp(namespaces ...string) {
 	for _, ns := range namespaces {
 		Expect(k8sClient.DeleteAllOf(ctx, &shutdownv1alpha1.ManagedApplication{}, client.InNamespace(ns))).To(Succeed())
 	}
+}
+
+// setAction sets spec.action of the ShutdownRequest in the place of the HTTP endpoint.
+// A merge patch does not conflict with the status writes of the operator.
+func setAction(action shutdownv1alpha1.Action) {
+	request := &shutdownv1alpha1.ShutdownRequest{ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName}}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"action":"`+string(action)+`"}}`))
+	Expect(k8sClient.Patch(ctx, request, patch)).To(Succeed())
+}
+
+func setReadyTimeout(ns, name string, timeout time.Duration) {
+	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"readyTimeout":"`+timeout.String()+`"}}`))
+	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
+}
+
+// completeShutdown creates a ShutdownRequest and waits for the phase Complete.
+func completeShutdown() {
+	createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+	Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+}
+
+// markReady sets the status of a Deployment or a StatefulSet to n ready and available replicas,
+// in the place of its controller, which does not run in envtest.
+func markReady(obj client.Object, n int32) {
+	setWorkloadStatus(obj, 0, n, n)
+}
+
+// setWorkloadStatus sets the status of a Deployment or a StatefulSet in the place of its controller.
+// status.observedGeneration is the generation minus generationLag. status.replicas is equal to ready.
+func setWorkloadStatus(obj client.Object, generationLag int64, ready, available int32) {
+	Eventually(func() error {
+		current := obj.DeepCopyObject().(client.Object)
+		if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), current); err != nil {
+			return err
+		}
+		observed := current.GetGeneration() - generationLag
+		switch o := current.(type) {
+		case *appsv1.Deployment:
+			o.Status = appsv1.DeploymentStatus{ObservedGeneration: observed, Replicas: ready, ReadyReplicas: ready, AvailableReplicas: available}
+		case *appsv1.StatefulSet:
+			o.Status = appsv1.StatefulSetStatus{ObservedGeneration: observed, Replicas: ready, ReadyReplicas: ready, AvailableReplicas: available}
+		default:
+			Fail("setWorkloadStatus supports only Deployments and StatefulSets")
+		}
+		return k8sClient.Status().Update(ctx, current)
+	}).Should(Succeed())
 }

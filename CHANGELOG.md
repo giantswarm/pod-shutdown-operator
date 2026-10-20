@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - feat: operator scaffold and basic shutdown
+- feat: scale up from the record on cancel
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
