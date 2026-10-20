@@ -32,11 +32,16 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	// The loop repeats while an application stops, so that a chain can go past more than one step in one reconcile.
 	isStopped := map[string]bool{}
 	attempted := map[string]bool{}
+	// canStop returns true when this reconcile has not yet tried to stop the application,
+	// and when all its dependents have stopped.
+	canStop := func(key string) bool {
+		return !attempted[key] && allIn(reverse[key], isStopped)
+	}
 	for progress := true; progress; {
 		progress = false
 		for _, app := range apps {
 			key := appKey(app.Namespace, app.Name)
-			if attempted[key] || !allIn(reverse[key], isStopped) {
+			if !canStop(key) {
 				continue
 			}
 			attempted[key] = true

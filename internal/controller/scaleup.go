@@ -73,11 +73,16 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	}
 	// The loop repeats while an application becomes done, so that a chain can go past more than one step in one reconcile.
 	attempted := map[string]bool{}
+	// canStart returns true when the application is not yet ready or degraded, when this reconcile
+	// has not yet tried to start it, and when all its dependencies are ready or degraded.
+	canStart := func(key string) bool {
+		return !done[key] && !attempted[key] && allIn(deps[key], done)
+	}
 	for progress := true; progress; {
 		progress = false
 		for _, app := range apps {
 			key := appKey(app.Namespace, app.Name)
-			if attempted[key] || done[key] || !allIn(deps[key], done) {
+			if !canStart(key) {
 				continue
 			}
 			attempted[key] = true
