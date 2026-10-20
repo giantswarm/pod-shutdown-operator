@@ -4,6 +4,7 @@ package operator_test
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -193,6 +194,14 @@ func setReadyTimeout(ns, name string, timeout time.Duration) {
 	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"readyTimeout":"`+timeout.String()+`"}}`))
 	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
+}
+
+// setDependsOn sets spec.dependsOn of a ManagedApplication.
+func setDependsOn(ns, name string, dependsOn ...string) {
+	body, err := json.Marshal(map[string]any{"spec": map[string]any{"dependsOn": dependsOn}})
+	Expect(err).NotTo(HaveOccurred())
+	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	Expect(k8sClient.Patch(ctx, app, client.RawPatch(types.MergePatchType, body))).To(Succeed())
 }
 
 // completeShutdown creates a ShutdownRequest and waits for the phase Complete.
