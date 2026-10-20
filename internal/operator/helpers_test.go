@@ -104,6 +104,31 @@ func createPod(ns, name string, labels map[string]string) {
 	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 }
 
+// createScheduledPod creates a Pod on a node. envtest runs no kubelet, so a delete with a grace period
+// above 0 leaves the Pod in Terminating. Only a delete with a grace period of 0 removes it at once.
+func createScheduledPod(ns, name string, labels map[string]string) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: labels},
+		Spec: corev1.PodSpec{
+			NodeName:   "node-1",
+			Containers: []corev1.Container{{Name: "app", Image: "busybox"}},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+}
+
+// podExists returns a function that returns true while the Pod exists.
+func podExists(ns, name string) func() bool {
+	return func() bool {
+		err := k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &corev1.Pod{})
+		if apierrors.IsNotFound(err) {
+			return false
+		}
+		Expect(err).NotTo(HaveOccurred())
+		return true
+	}
+}
+
 // setPodPhase sets the phase of a Pod in the place of the kubelet.
 func setPodPhase(ns, name string, phase corev1.PodPhase) {
 	pod := &corev1.Pod{}
@@ -134,6 +159,19 @@ func createShutdownRequest(action shutdownv1alpha1.Action) {
 	request := &shutdownv1alpha1.ShutdownRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
 		Spec:       shutdownv1alpha1.ShutdownRequestSpec{Action: action},
+	}
+	Expect(k8sClient.Create(ctx, request)).To(Succeed())
+}
+
+// createShutdownRequestWithBudget creates a ShutdownRequest with the action Shutdown, a budget, and a safety margin.
+func createShutdownRequestWithBudget(budget, safetyMargin time.Duration) {
+	request := &shutdownv1alpha1.ShutdownRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+		Spec: shutdownv1alpha1.ShutdownRequestSpec{
+			Action:       shutdownv1alpha1.ActionShutdown,
+			Budget:       &metav1.Duration{Duration: budget},
+			SafetyMargin: &metav1.Duration{Duration: safetyMargin},
+		},
 	}
 	Expect(k8sClient.Create(ctx, request)).To(Succeed())
 }
@@ -193,6 +231,12 @@ func setAction(action shutdownv1alpha1.Action) {
 func setReadyTimeout(ns, name string, timeout time.Duration) {
 	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"readyTimeout":"`+timeout.String()+`"}}`))
+	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
+}
+
+func setGracePeriod(ns, name string, gracePeriod time.Duration) {
+	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"gracePeriod":"`+gracePeriod.String()+`"}}`))
 	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
 }
 

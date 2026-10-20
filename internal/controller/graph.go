@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
@@ -65,4 +66,78 @@ func allIn(keys []string, set map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// cyclesAsSteps returns the dependencies with each dependency cycle in one parallel step.
+// An application in a cycle depends on all dependencies of the cycle, and an application that depends
+// on one application of a cycle depends on all applications of the cycle. The result has no cycle.
+func cyclesAsSteps(deps map[string][]string) map[string][]string {
+	component := components(deps)
+	members := map[int][]string{}
+	for key, c := range component {
+		members[c] = append(members[c], key)
+	}
+
+	steps := map[string][]string{}
+	for app, appDeps := range deps {
+		for _, dep := range appDeps {
+			if component[dep] == component[app] {
+				continue
+			}
+			for _, member := range members[component[app]] {
+				steps[member] = append(steps[member], members[component[dep]]...)
+			}
+		}
+	}
+	for app := range steps {
+		slices.Sort(steps[app])
+		steps[app] = slices.Compact(steps[app])
+	}
+	return steps
+}
+
+// components returns the strongly connected component of each application in the dependency map, as an index.
+// The applications of a dependency cycle share one component. It uses the algorithm of Tarjan.
+func components(deps map[string][]string) map[string]int {
+	index := map[string]int{}
+	low := map[string]int{}
+	onStack := map[string]bool{}
+	var stack []string
+	component := map[string]int{}
+	count := 0
+
+	var visit func(string)
+	visit = func(app string) {
+		index[app] = len(index)
+		low[app] = index[app]
+		stack = append(stack, app)
+		onStack[app] = true
+		for _, dep := range deps[app] {
+			if _, seen := index[dep]; !seen {
+				visit(dep)
+				low[app] = min(low[app], low[dep])
+			} else if onStack[dep] {
+				low[app] = min(low[app], index[dep])
+			}
+		}
+		if low[app] != index[app] {
+			return
+		}
+		for {
+			member := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[member] = false
+			component[member] = count
+			if member == app {
+				break
+			}
+		}
+		count++
+	}
+	for app := range deps {
+		if _, seen := index[app]; !seen {
+			visit(app)
+		}
+	}
+	return component
 }
