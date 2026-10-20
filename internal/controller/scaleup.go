@@ -48,8 +48,10 @@ func (r *ShutdownRequestReconciler) startScaleUp(ctx context.Context, request *s
 	return nil
 }
 
-// continueScaleUp scales each recorded workload to its recorded count and waits for readiness.
-// An application that is not ready at its readyTimeout goes into status.degraded.
+// continueScaleUp scales the recorded workloads to their recorded counts in dependency order and waits
+// for readiness. An application starts when all its dependencies are ready or degraded, so each
+// dependency group runs by itself. Its readyTimeout starts when it starts. An application that is
+// not ready at its readyTimeout goes into status.degraded.
 // It sets the phase Restored when each application is ready or degraded.
 func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	startedAt := ptr.Deref(request.Status.ScaleUpStartedAt, metav1.Time{})
@@ -57,42 +59,59 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 		r.scaleUp = scaleUpState{startedAt: startedAt, apps: map[string]*appScaleUp{}}
 	}
 
-	degraded := slices.Clone(request.Status.Degraded)
-	pending := false
-	for _, app := range request.Status.RecordedState.Applications {
-		key := app.Namespace + "/" + app.Name
-		state, found := r.scaleUp.apps[key]
-		if !found {
-			state = &appScaleUp{startedAt: time.Now()}
-			r.scaleUp.apps[key] = state
-		}
-		if state.ready || slices.Contains(degraded, key) {
-			continue
-		}
+	apps := request.Status.RecordedState.Applications
+	deps, err := r.dependencies(ctx, apps)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 
-		ready := true
-		for _, w := range app.Workloads {
-			workloadReady, err := r.startWorkload(ctx, app.Namespace, w)
+	degraded := slices.Clone(request.Status.Degraded)
+	// done holds the applications that are ready or degraded.
+	done := map[string]bool{}
+	for _, key := range degraded {
+		done[key] = true
+	}
+	// The loop repeats while an application becomes done, so that a chain can go past more than one step in one reconcile.
+	attempted := map[string]bool{}
+	for progress := true; progress; {
+		progress = false
+		for _, app := range apps {
+			key := appKey(app.Namespace, app.Name)
+			if attempted[key] || done[key] || !allIn(deps[key], done) {
+				continue
+			}
+			attempted[key] = true
+
+			state, found := r.scaleUp.apps[key]
+			if !found {
+				state = &appScaleUp{startedAt: time.Now()}
+				r.scaleUp.apps[key] = state
+			}
+			if !state.ready {
+				ready, err := r.startApplication(ctx, app)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				state.ready = ready
+			}
+			if state.ready {
+				done[key] = true
+				progress = true
+				continue
+			}
+
+			timeout, err := r.readyTimeout(ctx, app.Namespace, app.Name)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			ready = ready && workloadReady
+			if time.Since(state.startedAt) > timeout {
+				degraded = append(degraded, key)
+				done[key] = true
+				progress = true
+			}
 		}
-		if ready {
-			state.ready = true
-			continue
-		}
-
-		timeout, err := r.readyTimeout(ctx, app.Namespace, app.Name)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if time.Since(state.startedAt) > timeout {
-			degraded = append(degraded, key)
-			continue
-		}
-		pending = true
 	}
+	pending := len(done) < len(apps)
 
 	if len(degraded) != len(request.Status.Degraded) || !pending {
 		updated := request.DeepCopy()
@@ -108,6 +127,20 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil
+}
+
+// startApplication scales the workloads of an application to their recorded counts.
+// It returns true when all of them are ready.
+func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication) (bool, error) {
+	ready := true
+	for _, w := range app.Workloads {
+		workloadReady, err := r.startWorkload(ctx, app.Namespace, w)
+		if err != nil {
+			return false, err
+		}
+		ready = ready && workloadReady
+	}
+	return ready, nil
 }
 
 // startWorkload scales a workload to its recorded count. It returns true when the workload is ready.

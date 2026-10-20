@@ -17,24 +17,41 @@ import (
 
 var scaleToZero = client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))
 
-// continueShutdown scales each recorded workload to 0 and counts the applications whose pods have ended.
-// It works only from the record. It sets the phase Complete when all applications have stopped.
+// continueShutdown scales the recorded workloads to 0 in dependency order and counts the applications
+// whose pods have ended. An application stops as soon as all its dependents have stopped, so each
+// dependency group runs by itself. It takes the workloads from the record and dependsOn from the
+// ManagedApplications. It sets the phase Complete when all applications have stopped.
 func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
-	var stopped int32
-	for _, app := range request.Status.RecordedState.Applications {
-		appStopped := true
-		for _, w := range app.Workloads {
-			ended, err := r.stopWorkload(ctx, app.Namespace, w)
+	apps := request.Status.RecordedState.Applications
+	deps, err := r.dependencies(ctx, apps)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	reverse := dependents(deps)
+
+	// The loop repeats while an application stops, so that a chain can go past more than one step in one reconcile.
+	isStopped := map[string]bool{}
+	attempted := map[string]bool{}
+	for progress := true; progress; {
+		progress = false
+		for _, app := range apps {
+			key := appKey(app.Namespace, app.Name)
+			if attempted[key] || !allIn(reverse[key], isStopped) {
+				continue
+			}
+			attempted[key] = true
+			appStopped, err := r.stopApplication(ctx, app)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			appStopped = appStopped && ended
-		}
-		if appStopped {
-			stopped++
+			if appStopped {
+				isStopped[key] = true
+				progress = true
+			}
 		}
 	}
 
+	stopped := int32(len(isStopped)) //nolint:gosec // The number of applications is small.
 	complete := stopped == request.Status.Total
 	if stopped != request.Status.Stopped || complete {
 		updated := request.DeepCopy()
@@ -50,6 +67,19 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil
+}
+
+// stopApplication scales the workloads of an application to 0. It returns true when no pod of them remains.
+func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication) (bool, error) {
+	stopped := true
+	for _, w := range app.Workloads {
+		ended, err := r.stopWorkload(ctx, app.Namespace, w)
+		if err != nil {
+			return false, err
+		}
+		stopped = stopped && ended
+	}
+	return stopped, nil
 }
 
 // stopWorkload scales a workload to 0. It returns true when no pod of the workload remains.
