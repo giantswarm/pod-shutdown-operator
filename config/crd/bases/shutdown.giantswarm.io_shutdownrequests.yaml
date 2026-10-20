@@ -89,8 +89,9 @@ spec:
                 type: array
                 x-kubernetes-list-type: atomic
               failed:
-                description: Failed lists the applications (namespace/name) whose
-                  patch the API server rejected.
+                description: |-
+                  Failed lists the applications (namespace/name) that the operator could not stop: the API server
+                  rejected a write, or a write still failed at the forced stop.
                 items:
                   type: string
                 type: array

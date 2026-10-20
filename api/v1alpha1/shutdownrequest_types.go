@@ -145,7 +145,8 @@ type ShutdownRequestStatus struct {
 	// +listType=atomic
 	Degraded []string `json:"degraded,omitempty"`
 
-	// Failed lists the applications (namespace/name) whose patch the API server rejected.
+	// Failed lists the applications (namespace/name) that the operator could not stop: the API server
+	// rejected a write, or a write still failed at the forced stop.
 	// +optional
 	// +listType=atomic
 	Failed []string `json:"failed,omitempty"`

@@ -33,6 +33,7 @@ type ShutdownRequestReconciler struct {
 // +kubebuilder:rbac:groups=shutdown.giantswarm.io,resources=shutdownrequests/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=shutdown.giantswarm.io,resources=managedapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch

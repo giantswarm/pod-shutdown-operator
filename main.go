@@ -36,7 +36,7 @@ func main() {
 	flag.DurationVar(&pollInterval, "poll-interval", 2*time.Second, "The interval between checks while pods end and while workloads become ready.")
 	flag.DurationVar(&statefulSetScaleUpDelay, "statefulset-scale-up-delay", 5*time.Second,
 		"The time that a StatefulSet scale-up waits after a forced delete of its pods. "+
-			"After a forced delete, the container can still run for up to 2 seconds.")
+			"After a forced delete, the container can run for at least 2 more seconds, which is the kubelet minimum.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

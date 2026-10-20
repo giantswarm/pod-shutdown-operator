@@ -18,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
@@ -104,9 +105,10 @@ func createPod(ns, name string, labels map[string]string) {
 	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 }
 
-// createScheduledPod creates a Pod on a node. envtest runs no kubelet, so a delete with a grace period
-// above 0 leaves the Pod in Terminating. Only a delete with a grace period of 0 removes it at once.
-func createScheduledPod(ns, name string, labels map[string]string) {
+// createScheduledPod creates a Pod on a node. The owner is the controller of the Pod, or nil for a bare Pod.
+// envtest runs no kubelet, so a delete with a grace period above 0 leaves the Pod in Terminating.
+// Only a delete with a grace period of 0 removes it at once.
+func createScheduledPod(ns, name string, labels map[string]string, owner client.Object) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: labels},
 		Spec: corev1.PodSpec{
@@ -114,7 +116,58 @@ func createScheduledPod(ns, name string, labels map[string]string) {
 			Containers: []corev1.Container{{Name: "app", Image: "busybox"}},
 		},
 	}
+	if owner != nil {
+		Expect(controllerutil.SetControllerReference(owner, pod, k8sClient.Scheme())).To(Succeed())
+	}
 	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+}
+
+// createOwnedPod creates a scheduled Pod that a Deployment or a StatefulSet owns, in the place of its controller.
+// A StatefulSet is the controller of its Pods. A Deployment is the controller of a ReplicaSet,
+// which is the controller of the Pods.
+func createOwnedPod(ns, name string, workload client.Object) {
+	owner := workload
+	if d, isDeployment := workload.(*appsv1.Deployment); isDeployment {
+		owner = replicaSetOf(d)
+	}
+	createScheduledPod(ns, name, appLabels(workload.GetName()), owner)
+}
+
+// replicaSetOf returns the ReplicaSet of a Deployment. It creates the ReplicaSet at the first call.
+func replicaSetOf(d *appsv1.Deployment) *appsv1.ReplicaSet {
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: d.Name + "-rs"},
+		Spec: appsv1.ReplicaSetSpec{
+			Replicas: d.Spec.Replicas,
+			Selector: d.Spec.Selector,
+			Template: d.Spec.Template,
+		},
+	}
+	Expect(controllerutil.SetControllerReference(d, rs, k8sClient.Scheme())).To(Succeed())
+	err := k8sClient.Create(ctx, rs)
+	if apierrors.IsAlreadyExists(err) {
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		return rs
+	}
+	Expect(err).NotTo(HaveOccurred())
+	return rs
+}
+
+// addFinalizer adds a finalizer to a Pod, so that a delete leaves the Pod in place.
+// The cleanup of the test removes the finalizer.
+func addFinalizer(ns, name string) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	add := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":["test.giantswarm.io/keep"]}}`))
+	Expect(k8sClient.Patch(ctx, pod, add)).To(Succeed())
+	DeferCleanup(func() {
+		remove := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`))
+		Expect(k8sClient.Patch(ctx, pod, remove)).To(Succeed())
+	})
+}
+
+// until returns the time until t, and at least 1ms. A Consistently with no time left checks one time.
+func until(t time.Time) time.Duration {
+	return max(time.Until(t), time.Millisecond)
 }
 
 // podExists returns a function that returns true while the Pod exists.

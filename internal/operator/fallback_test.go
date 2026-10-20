@@ -66,6 +66,47 @@ func createGuardedDeployment(ns, deployment string) client.Object {
 	return d
 }
 
+// createStuckDeployment creates a Deployment with 1 replica and an admission webhook that cannot be reached.
+// The API server then fails each update of the Deployment with an internal error, as for a webhook whose
+// backend has stopped. It waits until the API server applies the webhook.
+func createStuckDeployment(ns, name string) client.Object {
+	d := createDeployment(ns, name, 1)
+	Expect(k8sClient.Patch(ctx, d, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"stuck":"true"}}}`)))).To(Succeed())
+
+	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "stuck-"},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{{
+			Name: "stuck.test.giantswarm.io",
+			ClientConfig: admissionregistrationv1.WebhookClientConfig{
+				// No server listens on port 1.
+				URL: ptr.To("https://127.0.0.1:1/validate"),
+			},
+			Rules: []admissionregistrationv1.RuleWithOperations{{
+				Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
+				Rule: admissionregistrationv1.Rule{
+					APIGroups:   []string{"apps"},
+					APIVersions: []string{"v1"},
+					Resources:   []string{"deployments"},
+				},
+			}},
+			FailurePolicy:           ptr.To(admissionregistrationv1.Fail),
+			SideEffects:             ptr.To(admissionregistrationv1.SideEffectClassNone),
+			AdmissionReviewVersions: []string{"v1"},
+			TimeoutSeconds:          ptr.To[int32](1),
+			NamespaceSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+			ObjectSelector:          &metav1.LabelSelector{MatchLabels: map[string]string{"stuck": "true"}},
+		}},
+	}
+	Expect(k8sClient.Create(ctx, webhook)).To(Succeed())
+	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, webhook)).To(Succeed()) })
+
+	scaleToZero := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))
+	Eventually(func() error {
+		return k8sClient.Patch(ctx, d, scaleToZero, client.DryRunAll)
+	}).Should(MatchError(ContainSubstring("failed calling webhook")))
+	return d
+}
+
 var _ = Describe("The fallback rules in a real shutdown", func() {
 	var (
 		ns   string
@@ -189,6 +230,29 @@ var _ = Describe("The fallback rules in a real shutdown", func() {
 		Expect(replicasOf(db)()).To(BeZero())
 		Expect(replicasOf(other)()).To(BeZero())
 		Expect(replicasOf(guarded)()).To(Equal(int32(3)))
+	})
+
+	It("reports an application whose patch still fails at its forced stop in status.failed and goes on", func() {
+		web := createStuckDeployment(ns, "web")
+		db := createStatefulSet(ns, "db", 1)
+		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindStatefulSet, "db"))
+		setDependsOn(ns, "frontend", "database")
+		failedOf := func() []string { return getRequest().Status.Failed }
+
+		// The time available is 3s and the chain is 60s, so the deadline of frontend is 1.5s after the start.
+		createShutdownRequestWithBudget(4*time.Second, time.Second)
+		start := startedAt()
+
+		// An internal error before the forced stop is not a rejection, so the operator tries again.
+		Consistently(failedOf, until(start.Add(time.Second))).Should(BeEmpty())
+		Expect(replicasOf(db)()).To(Equal(int32(1)))
+
+		Eventually(failedOf).Should(ConsistOf(ns + "/frontend"))
+		Eventually(replicasOf(db)).Should(BeZero())
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+		Expect(stoppedOf()).To(Equal(int32(1)))
+		Expect(replicasOf(web)()).To(Equal(int32(1)))
 	})
 })
 

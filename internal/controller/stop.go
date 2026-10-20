@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,14 +27,14 @@ var errRejected = errors.New("the API server rejected the write")
 
 // isRejected returns true when the API server rejected a request, for example because of RBAC,
 // validation, or admission. It returns false for an error that a later request can avoid:
-// NotFound, a timeout, a conflict, too many requests, a server error, or no response.
+// NotFound, a failed authentication, a timeout, a conflict, too many requests, a server error, or no response.
 func isRejected(err error) bool {
 	var status apierrors.APIStatus
 	if !errors.As(err, &status) {
 		return false
 	}
 	switch code := status.Status().Code; code {
-	case http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+	case http.StatusUnauthorized, http.StatusNotFound, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
 		return false
 	default:
 		return code >= 400 && code < 500
@@ -73,8 +74,10 @@ func (s *stopState) forceAt(key string, times stopTimes, now time.Time) time.Tim
 // dependency group runs by itself. It takes the workloads from the record and dependsOn from the
 // ManagedApplications. At the forced stop time of an application, it deletes the remaining pods with a
 // grace period of 0. An application whose write the API server rejects goes into status.failed.
+// An other error of one application does not stop the other applications. The next poll tries again,
+// up to the forced stop. An error at the forced stop also puts the application into status.failed,
+// so that a stuck application does not block its dependencies past their deadlines.
 // It sets the phase Complete when all applications have a final state: stopped or failed.
-// An other error of one application does not stop the other applications. The next poll tries again.
 func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	apps := request.Status.RecordedState.Applications
 	deps, err := r.dependencies(ctx, apps)
@@ -94,8 +97,9 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	if !r.stop.startedAt.Equal(&startedAt) {
 		r.stop = stopState{startedAt: startedAt}
 	}
+	// No validation stops a negative safety margin, which would move the end past the budget.
 	end := startedAt.Add(ptr.Deref(request.Spec.Budget, metav1.Duration{Duration: defaultBudget}).Duration -
-		ptr.Deref(request.Spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration)
+		max(ptr.Deref(request.Spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration, 0))
 	// The dependency groups start when the shutdown starts.
 	times := planStopTimes(keys, deps, gracePeriods, startedAt.Time, end)
 	reverse := dependents(cyclesAsSteps(deps))
@@ -126,7 +130,7 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 			attempted[key] = true
 			force := !now.Before(r.stop.forceAt(key, times[key], now))
 			appStopped, err := r.stopApplication(ctx, app, force)
-			if errors.Is(err, errRejected) {
+			if errors.Is(err, errRejected) || (err != nil && force) {
 				ctrl.LoggerFrom(ctx).Error(err, "Failed to stop the application", "application", key)
 				failed = append(failed, key)
 				final[key] = true
@@ -145,6 +149,9 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 		}
 	}
 
+	// A transient error can hide an application that stopped in an earlier poll, and the applications below it.
+	// The count for the human operator does not go down.
+	stopped = max(stopped, request.Status.Stopped)
 	complete := len(final) == len(apps)
 	if stopped != request.Status.Stopped || len(failed) != len(request.Status.Failed) || complete {
 		updated := request.DeepCopy()
@@ -169,23 +176,21 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 
 // stopApplication scales the workloads of an application to 0. It returns true when no pod of them remains.
 // With force, it deletes the remaining pods with a grace period of 0.
-// It stops each workload, also after a rejected write, and then returns an error that wraps errRejected.
+// It stops each workload, also after an error, and then returns all errors. The result wraps errRejected
+// when the API server rejected a write.
 func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication, force bool) (bool, error) {
 	stopped := true
-	var rejected []error
+	var errs []error
 	for _, w := range app.Workloads {
 		ended, err := r.stopWorkload(ctx, app.Namespace, w, force)
-		if errors.Is(err, errRejected) {
-			rejected = append(rejected, err)
-			continue
-		}
 		if err != nil {
-			return false, err
+			errs = append(errs, err)
+			continue
 		}
 		stopped = stopped && ended
 	}
-	if len(rejected) > 0 {
-		return false, errors.Join(rejected...)
+	if len(errs) > 0 {
+		return false, errors.Join(errs...)
 	}
 	return stopped, nil
 }
@@ -222,7 +227,7 @@ func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace 
 		}
 	}
 	if force {
-		deleted, err := r.forceDelete(ctx, namespace, w, selector)
+		deleted, err := r.forceDelete(ctx, obj, selector)
 		return deleted == 0 && err == nil, err
 	}
 	pods, err := r.runningPods(ctx, namespace, selector)
@@ -230,9 +235,12 @@ func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace 
 }
 
 // forceDelete deletes the pods of a workload that have not ended, with a grace period of 0.
-// It skips a pod that already has a grace period of 0. It returns the number of pods that it deleted.
+// It deletes only the pods that the workload owns, because the operator does not manage bare pods or
+// unlisted workloads with the same labels. It skips a pod that already has a grace period of 0.
+// It returns the number of pods that it deleted.
 // After a forced delete of a StatefulSet pod, it keeps the time for the delay of the scale-up.
-func (r *ShutdownRequestReconciler) forceDelete(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload, selector *metav1.LabelSelector) (int, error) {
+func (r *ShutdownRequestReconciler) forceDelete(ctx context.Context, workload client.Object, selector *metav1.LabelSelector) (int, error) {
+	namespace := workload.GetNamespace()
 	pods, err := r.runningPods(ctx, namespace, selector)
 	if err != nil {
 		return 0, err
@@ -242,7 +250,14 @@ func (r *ShutdownRequestReconciler) forceDelete(ctx context.Context, namespace s
 		if ptr.Deref(pod.DeletionGracePeriodSeconds, -1) == 0 {
 			continue
 		}
-		err := retryOnce(func() error { return r.Client.Delete(ctx, &pod, client.GracePeriodSeconds(0)) })
+		owned, err := r.ownedBy(ctx, &pod, workload)
+		if err != nil {
+			return deleted, err
+		}
+		if !owned {
+			continue
+		}
+		err = retryOnce(func() error { return r.Client.Delete(ctx, &pod, client.GracePeriodSeconds(0)) })
 		if apierrors.IsNotFound(err) {
 			continue
 		}
@@ -254,14 +269,35 @@ func (r *ShutdownRequestReconciler) forceDelete(ctx context.Context, namespace s
 		}
 		deleted++
 		ctrl.LoggerFrom(ctx).Info("Forced stop: deleted a pod with a grace period of 0", "pod", appKey(namespace, pod.Name))
-		if w.Kind == shutdownv1alpha1.WorkloadKindStatefulSet {
+		if _, isStatefulSet := workload.(*appsv1.StatefulSet); isStatefulSet {
 			if r.forcedDeletes == nil {
 				r.forcedDeletes = map[string]time.Time{}
 			}
-			r.forcedDeletes[appKey(namespace, w.Name)] = time.Now()
+			r.forcedDeletes[appKey(namespace, workload.GetName())] = time.Now()
 		}
 	}
 	return deleted, nil
+}
+
+// ownedBy returns true when the workload controls the pod. The controller of a StatefulSet pod is the
+// StatefulSet. The controller of a Deployment pod is a ReplicaSet, whose controller is the Deployment.
+func (r *ShutdownRequestReconciler) ownedBy(ctx context.Context, pod *corev1.Pod, workload client.Object) (bool, error) {
+	if _, isDeployment := workload.(*appsv1.Deployment); !isDeployment {
+		return metav1.IsControlledBy(pod, workload), nil
+	}
+	ref := metav1.GetControllerOf(pod)
+	if ref == nil || ref.Kind != "ReplicaSet" {
+		return false, nil
+	}
+	var rs appsv1.ReplicaSet
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: ref.Name}, &rs)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get ReplicaSet %s/%s: %w", pod.Namespace, ref.Name, err)
+	}
+	return rs.UID == ref.UID && metav1.IsControlledBy(&rs, workload), nil
 }
 
 // retryOnce calls write. It calls write one more time when the first call fails with an error other than NotFound.

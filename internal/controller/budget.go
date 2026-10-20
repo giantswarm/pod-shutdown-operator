@@ -117,7 +117,8 @@ func (r *ShutdownRequestReconciler) gracePeriods(ctx context.Context, recorded [
 	for _, app := range apps.Items {
 		key := appKey(app.Namespace, app.Name)
 		if _, inRecord := gracePeriods[key]; inRecord && app.Spec.GracePeriod != nil {
-			gracePeriods[key] = app.Spec.GracePeriod.Duration
+			// No validation stops a negative value.
+			gracePeriods[key] = max(app.Spec.GracePeriod.Duration, 0)
 		}
 	}
 	return gracePeriods, nil
