@@ -64,6 +64,7 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	deps = cyclesAsSteps(deps)
 
 	degraded := slices.Clone(request.Status.Degraded)
 	// done holds the applications that are ready or degraded.
@@ -149,7 +150,8 @@ func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app sh
 }
 
 // startWorkload scales a workload to its recorded count. It returns true when the workload is ready.
-// A workload that no longer exists counts as ready.
+// A workload that no longer exists counts as ready. A StatefulSet waits for StatefulSetScaleUpDelay
+// after a forced delete of its pods, because the old container can still run and hold the volume.
 // It sends the patch at each check and reads readiness from the response, not from the cache.
 // After a cancel in ShuttingDown, the cache can still hold the count before the scale to 0.
 // The API server does not store a patch that changes nothing.
@@ -157,6 +159,10 @@ func (r *ShutdownRequestReconciler) startWorkload(ctx context.Context, namespace
 	obj, ok := newScalable(w.Kind)
 	if !ok {
 		return true, nil
+	}
+	if forcedAt, found := r.forcedDeletes[appKey(namespace, w.Name)]; found &&
+		w.Kind == shutdownv1alpha1.WorkloadKindStatefulSet && time.Since(forcedAt) < r.StatefulSetScaleUpDelay {
+		return false, nil
 	}
 	obj.SetNamespace(namespace)
 	obj.SetName(w.Name)

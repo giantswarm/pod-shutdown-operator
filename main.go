@@ -25,7 +25,7 @@ var setupLog = ctrl.Log.WithName("setup")
 func main() {
 	var metricsAddr, probeAddr, leaderElectionNamespace string
 	var enableLeaderElection bool
-	var pollInterval time.Duration
+	var pollInterval, statefulSetScaleUpDelay time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
 		"The endpoint has no authentication, so keep it inside the cluster. The value 0 disables the metrics endpoint.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address of the probe endpoint.")
@@ -34,6 +34,9 @@ func main() {
 	flag.StringVar(&leaderElectionNamespace, "leader-election-namespace", "",
 		"The namespace of the leader election lease. Empty means the namespace of the pod.")
 	flag.DurationVar(&pollInterval, "poll-interval", 2*time.Second, "The interval between checks while pods end and while workloads become ready.")
+	flag.DurationVar(&statefulSetScaleUpDelay, "statefulset-scale-up-delay", 5*time.Second,
+		"The time that a StatefulSet scale-up waits after a forced delete of its pods. "+
+			"After a forced delete, the container can run for at least 2 more seconds, which is the kubelet minimum.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -51,8 +54,9 @@ func main() {
 			// It makes the hand-over to a new leader faster.
 			LeaderElectionReleaseOnCancel: true,
 		},
-		PollInterval: pollInterval,
-		FieldOwner:   fieldOwner,
+		PollInterval:            pollInterval,
+		FieldOwner:              fieldOwner,
+		StatefulSetScaleUpDelay: statefulSetScaleUpDelay,
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create the manager")

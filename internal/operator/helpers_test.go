@@ -18,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
@@ -104,6 +105,83 @@ func createPod(ns, name string, labels map[string]string) {
 	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 }
 
+// createScheduledPod creates a Pod on a node. The owner is the controller of the Pod, or nil for a bare Pod.
+// envtest runs no kubelet, so a delete with a grace period above 0 leaves the Pod in Terminating.
+// Only a delete with a grace period of 0 removes it at once.
+func createScheduledPod(ns, name string, labels map[string]string, owner client.Object) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: labels},
+		Spec: corev1.PodSpec{
+			NodeName:   "node-1",
+			Containers: []corev1.Container{{Name: "app", Image: "busybox"}},
+		},
+	}
+	if owner != nil {
+		Expect(controllerutil.SetControllerReference(owner, pod, k8sClient.Scheme())).To(Succeed())
+	}
+	Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+}
+
+// createOwnedPod creates a scheduled Pod that a Deployment or a StatefulSet owns, in the place of its controller.
+// A StatefulSet is the controller of its Pods. A Deployment is the controller of a ReplicaSet,
+// which is the controller of the Pods.
+func createOwnedPod(ns, name string, workload client.Object) {
+	owner := workload
+	if d, isDeployment := workload.(*appsv1.Deployment); isDeployment {
+		owner = replicaSetOf(d)
+	}
+	createScheduledPod(ns, name, appLabels(workload.GetName()), owner)
+}
+
+// replicaSetOf returns the ReplicaSet of a Deployment. It creates the ReplicaSet at the first call.
+func replicaSetOf(d *appsv1.Deployment) *appsv1.ReplicaSet {
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Namespace: d.Namespace, Name: d.Name + "-rs"},
+		Spec: appsv1.ReplicaSetSpec{
+			Replicas: d.Spec.Replicas,
+			Selector: d.Spec.Selector,
+			Template: d.Spec.Template,
+		},
+	}
+	Expect(controllerutil.SetControllerReference(d, rs, k8sClient.Scheme())).To(Succeed())
+	err := k8sClient.Create(ctx, rs)
+	if apierrors.IsAlreadyExists(err) {
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(rs), rs)).To(Succeed())
+		return rs
+	}
+	Expect(err).NotTo(HaveOccurred())
+	return rs
+}
+
+// addFinalizer adds a finalizer to a Pod, so that a delete leaves the Pod in place.
+// The cleanup of the test removes the finalizer.
+func addFinalizer(ns, name string) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	add := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":["test.giantswarm.io/keep"]}}`))
+	Expect(k8sClient.Patch(ctx, pod, add)).To(Succeed())
+	DeferCleanup(func() {
+		remove := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`))
+		Expect(k8sClient.Patch(ctx, pod, remove)).To(Succeed())
+	})
+}
+
+// until returns the time until t, and at least 1ms. A Consistently with no time left checks one time.
+func until(t time.Time) time.Duration {
+	return max(time.Until(t), time.Millisecond)
+}
+
+// podExists returns a function that returns true while the Pod exists.
+func podExists(ns, name string) func() bool {
+	return func() bool {
+		err := k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &corev1.Pod{})
+		if apierrors.IsNotFound(err) {
+			return false
+		}
+		Expect(err).NotTo(HaveOccurred())
+		return true
+	}
+}
+
 // setPodPhase sets the phase of a Pod in the place of the kubelet.
 func setPodPhase(ns, name string, phase corev1.PodPhase) {
 	pod := &corev1.Pod{}
@@ -134,6 +212,19 @@ func createShutdownRequest(action shutdownv1alpha1.Action) {
 	request := &shutdownv1alpha1.ShutdownRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
 		Spec:       shutdownv1alpha1.ShutdownRequestSpec{Action: action},
+	}
+	Expect(k8sClient.Create(ctx, request)).To(Succeed())
+}
+
+// createShutdownRequestWithBudget creates a ShutdownRequest with the action Shutdown, a budget, and a safety margin.
+func createShutdownRequestWithBudget(budget, safetyMargin time.Duration) {
+	request := &shutdownv1alpha1.ShutdownRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+		Spec: shutdownv1alpha1.ShutdownRequestSpec{
+			Action:       shutdownv1alpha1.ActionShutdown,
+			Budget:       &metav1.Duration{Duration: budget},
+			SafetyMargin: &metav1.Duration{Duration: safetyMargin},
+		},
 	}
 	Expect(k8sClient.Create(ctx, request)).To(Succeed())
 }
@@ -193,6 +284,12 @@ func setAction(action shutdownv1alpha1.Action) {
 func setReadyTimeout(ns, name string, timeout time.Duration) {
 	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
 	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"readyTimeout":"`+timeout.String()+`"}}`))
+	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
+}
+
+func setGracePeriod(ns, name string, gracePeriod time.Duration) {
+	app := &shutdownv1alpha1.ManagedApplication{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"gracePeriod":"`+gracePeriod.String()+`"}}`))
 	Expect(k8sClient.Patch(ctx, app, patch)).To(Succeed())
 }
 

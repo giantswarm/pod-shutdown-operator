@@ -22,6 +22,10 @@ type Config struct {
 
 	// FieldOwner is the field manager name of each write that the operator sends.
 	FieldOwner string
+
+	// StatefulSetScaleUpDelay is the time that a StatefulSet scale-up waits after a forced delete of its pods.
+	// After a forced delete, the container can still run for some seconds.
+	StatefulSetScaleUpDelay time.Duration
 }
 
 // NewManager returns a manager with the ShutdownRequest controller.
@@ -36,8 +40,9 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	}
 
 	reconciler := &controller.ShutdownRequestReconciler{
-		Client:       client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
-		PollInterval: c.PollInterval,
+		Client:                  client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+		PollInterval:            c.PollInterval,
+		StatefulSetScaleUpDelay: c.StatefulSetScaleUpDelay,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownRequest controller: %w", err)

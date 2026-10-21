@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +35,9 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	if err := r.Client.Status().Update(ctx, updated); err != nil {
 		return fmt.Errorf("write the record: %w", err)
 	}
+	// This process starts the shutdown, so it knows the start time of each application.
+	// The update reads the stored start time back, which has a precision of one second.
+	r.stop = stopState{startedAt: *updated.Status.ShutdownStartedAt, apps: map[string]time.Time{}}
 	return nil
 }
 
