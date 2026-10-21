@@ -26,12 +26,8 @@ type stopTimes struct {
 }
 
 // planStopTimes returns the stop times of each application by key. It is planning code and changes nothing.
-//
-// Each dependency group gets the time from groupsStart to end. When the gracePeriod sum of the longest
-// chain in a group is larger, every gracePeriod in the group shrinks by the same ratio, so that the
-// longest chain fits. The deadline of an application is end minus the shrunk gracePeriod sum of the
-// longest chain below it. The applications of a dependency cycle are one parallel step.
 func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[string]time.Duration, groupsStart, end time.Time) map[string]stopTimes {
+	// The applications of a dependency cycle are one parallel step, so the chain counts the cycle one time.
 	steps := cyclesAsSteps(deps)
 
 	// below holds the gracePeriod sum of the longest chain below each application, before the shrink.
@@ -41,6 +37,7 @@ func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[str
 		if sum, found := below[key]; found {
 			return sum
 		}
+		// The longest chain below an application goes through the dependency with the largest sum.
 		var longest time.Duration
 		for _, dep := range steps[key] {
 			longest = max(longest, gracePeriods[dep]+chainBelow(dep))
@@ -49,20 +46,24 @@ func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[str
 		return longest
 	}
 
+	// The longest chain of a group starts at one of its applications and goes down.
 	group := groups(keys, deps)
 	longestChain := map[int]time.Duration{}
 	for _, key := range keys {
 		longestChain[group[key]] = max(longestChain[group[key]], gracePeriods[key]+chainBelow(key))
 	}
 
+	// Each group gets the time from groupsStart to end.
 	available := max(end.Sub(groupsStart), 0)
 	times := map[string]stopTimes{}
 	for _, key := range keys {
+		// When the longest chain does not fit, every gracePeriod in the group shrinks by the same ratio.
 		ratio := 1.0
 		if longest := longestChain[group[key]]; longest > available {
 			ratio = float64(available) / float64(longest)
 		}
 		times[key] = stopTimes{
+			// The deadline leaves time for the shrunk chain below the application.
 			deadline:    end.Add(-shrink(below[key], ratio)),
 			gracePeriod: shrink(gracePeriods[key], ratio),
 		}
@@ -75,8 +76,8 @@ func shrink(d time.Duration, ratio float64) time.Duration {
 }
 
 // groups returns the dependency group of each application by key, as an index.
-// A dependency group is a set of applications that dependsOn links together.
 func groups(keys []string, deps map[string][]string) map[string]int {
+	// A dependency group is a set of applications that dependsOn links together, in either direction.
 	links := map[string][]string{}
 	for app, appDeps := range deps {
 		for _, dep := range appDeps {
@@ -85,6 +86,7 @@ func groups(keys []string, deps map[string][]string) map[string]int {
 		}
 	}
 
+	// mark gives the group to each application that the key links to.
 	group := map[string]int{}
 	var mark func(key string, g int)
 	mark = func(key string, g int) {
@@ -96,6 +98,7 @@ func groups(keys []string, deps map[string][]string) map[string]int {
 			mark(linked, g)
 		}
 	}
+	// An application with no group yet starts a new group.
 	for g, key := range keys {
 		mark(key, g)
 	}
