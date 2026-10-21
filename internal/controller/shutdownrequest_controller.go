@@ -51,6 +51,8 @@ func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, r.startScaleUp(ctx, &request)
 	case request.Status.Phase == "" && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
 		return ctrl.Result{}, r.startShutdown(ctx, &request)
+	case request.Status.Phase == shutdownv1alpha1.PhaseScalingUp && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
+		return ctrl.Result{}, r.reuseRecord(ctx, &request)
 	case request.Status.Phase == shutdownv1alpha1.PhaseShuttingDown:
 		return r.continueShutdown(ctx, &request)
 	case request.Status.Phase == shutdownv1alpha1.PhaseScalingUp:

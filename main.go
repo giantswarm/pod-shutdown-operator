@@ -23,7 +23,7 @@ const (
 var setupLog = ctrl.Log.WithName("setup")
 
 func main() {
-	var metricsAddr, probeAddr, leaderElectionNamespace string
+	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile string
 	var enableLeaderElection bool
 	var pollInterval, statefulSetScaleUpDelay time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
@@ -37,6 +37,10 @@ func main() {
 	flag.DurationVar(&statefulSetScaleUpDelay, "statefulset-scale-up-delay", 5*time.Second,
 		"The time that a StatefulSet scale-up waits after a forced delete of its pods. "+
 			"After a forced delete, the container can run for at least 2 more seconds, which is the kubelet minimum.")
+	flag.StringVar(&apiAddr, "api-bind-address", ":8082", "The address of the HTTP endpoint for the shutdown, cancel, and progress calls. "+
+		"Empty disables the endpoint.")
+	flag.StringVar(&apiTokenFile, "api-token-file", "", "The path of the file that holds the token of the HTTP endpoint, "+
+		"for example from a mounted Secret. With no readable token, the endpoint refuses every call that needs a token.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -57,6 +61,8 @@ func main() {
 		PollInterval:            pollInterval,
 		FieldOwner:              fieldOwner,
 		StatefulSetScaleUpDelay: statefulSetScaleUpDelay,
+		APIBindAddress:          apiAddr,
+		APITokenFile:            apiTokenFile,
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create the manager")
