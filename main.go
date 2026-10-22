@@ -55,12 +55,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// The node name is the key of the own boot ID in the record. With no name, the operator cannot tell its nodes apart.
+	// The node name is the key of the own boot ID in the record.
 	if nodeName == "" {
 		setupLog.Error(errors.New("the node name is empty"), "Set --node-name or NODE_NAME")
 		os.Exit(1)
 	}
-	// A stale limit of 0 or less makes each new request stale, so no shutdown starts.
+	// A limit of 0 or less makes every new request stale.
 	if staleLimit <= 0 {
 		setupLog.Error(errors.New("the stale limit is not above 0"), "Set --stale-limit to a positive duration")
 		os.Exit(1)

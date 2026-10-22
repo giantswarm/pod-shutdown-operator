@@ -39,17 +39,14 @@ type Config struct {
 	// APITokenFile is the path of the file that holds the token of the HTTP endpoint, for example from a mounted Secret.
 	APITokenFile string
 
-	// BootIDFile is the path of the file that holds the boot ID of the operator node.
+	// BootIDFile and NodeName are for the operator node.
 	BootIDFile string
-
-	// NodeName is the name of the operator node.
-	NodeName string
+	NodeName   string
 
 	// StaleLimit is the age after which a request with no phase is stale.
-	// The operator then sets the phase Restored with the reason Stale, and changes nothing else.
 	StaleLimit time.Duration
 
-	// Clock gives the age of a request.
+	// Clock gives the age of a request, so that a test can set it.
 	Clock clock.PassiveClock
 }
 

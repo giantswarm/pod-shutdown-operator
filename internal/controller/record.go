@@ -49,7 +49,7 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 	now := metav1.Now()
 	updated := request.DeepCopy()
 	// The new status keeps the fields from the start of the first shutdown. The new start time gives the whole budget again.
-	// A power cycle can come before the new shutdown, so the boot IDs are from now.
+	// A power cycle can come before the reuse, so the boot IDs are read again.
 	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     request.Status.RecordedState,
@@ -67,7 +67,7 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 	return nil
 }
 
-// markStale sets the phase Restored with the reason Stale. It changes nothing else.
+// markStale sets the phase Restored with the reason Stale.
 func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
 	updated := request.DeepCopy()
 	updated.Status.Phase = shutdownv1alpha1.PhaseRestored

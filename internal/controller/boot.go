@@ -14,7 +14,7 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// readBootID returns the boot ID of the operator node from the boot ID file.
+// readBootID returns the boot ID of the operator node.
 func (r *ShutdownRequestReconciler) readBootID() (string, error) {
 	data, err := os.ReadFile(r.BootIDFile)
 	if err != nil {
@@ -30,9 +30,9 @@ func (r *ShutdownRequestReconciler) readBootID() (string, error) {
 // currentBootIDs returns the boot ID of each node by node name.
 func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[string]string {
 	log := ctrl.LoggerFrom(ctx)
-	// The list reads the API server once, so that the operator keeps no cache of all Nodes.
+	// The API reader keeps no Node cache in memory.
 	var nodes corev1.NodeList
-	// With no Node list, only the own entry is known, and the shutdown goes on.
+	// A failed list must not block the shutdown.
 	if err := r.APIReader.List(ctx, &nodes); err != nil {
 		log.Error(err, "Failed to list the Nodes, records only the own boot ID")
 	}
@@ -43,10 +43,10 @@ func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[stri
 		}
 	}
 
-	// The kubelet can post the boot ID of a new boot after the operator starts, so the own entry comes from the file.
+	// After a reboot, the Node object can still show the old boot ID.
 	delete(bootIDs, r.NodeName)
 	bootID, err := r.readBootID()
-	// With no readable file, the own entry is unknown and the shutdown goes on.
+	// An unreadable file leaves the own entry unknown.
 	if err != nil {
 		log.Error(err, "Failed to read the boot ID, records it as unknown")
 		return bootIDs
@@ -55,9 +55,9 @@ func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[stri
 	return bootIDs
 }
 
-// checkBoot compares the own boot ID with the record. After a power cycle, it sets the action Cancel and records the new boot IDs.
+// checkBoot sets the action Cancel when the own boot ID does not match the record.
 func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
-	// With no phase, the request has no record. In Restored, the record is already restored.
+	// A request with no phase or in Restored has no record to restore.
 	if request.Status.Phase == "" || request.Status.Phase == shutdownv1alpha1.PhaseRestored {
 		return nil
 	}
@@ -65,18 +65,17 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	log := ctrl.LoggerFrom(ctx)
 	bootID, err := r.readBootID()
 	recorded := request.Status.BootIDs[r.NodeName]
-	// An equal boot ID means an operator restart, and the current phase continues.
+	// An equal boot ID means an operator restart.
 	if err == nil && bootID == recorded {
 		return nil
 	}
-	// An unreadable file or a missing entry also counts as a power cycle, so that the cluster does not stay at 0.
+	// An unknown boot ID counts as a power cycle, so that the cluster does not stay at 0.
 	if err != nil {
 		log.Error(err, "Failed to read the boot ID, counts it as a power cycle")
 	}
 	log.Info("Found a power cycle, scales up from the record", "node", r.NodeName, "bootID", bootID, "recordedBootID", recorded)
 
-	// A Shutdown from before the power cycle must not stop the cluster again. A later POST /shutdown can.
-	// With the action Cancel, the reconcile already starts or continues the scale-up.
+	// A Shutdown from before the power cycle must not stop the cluster again.
 	if request.Spec.Action != shutdownv1alpha1.ActionCancel {
 		patch := client.MergeFromWithOptions(request.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		request.Spec.Action = shutdownv1alpha1.ActionCancel
@@ -84,8 +83,8 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 			return fmt.Errorf("set the action Cancel after a power cycle: %w", err)
 		}
 	}
-	// The new boot IDs come after the Cancel, so that a stop between the two writes finds the power cycle again.
-	// A later restart in this boot then keeps a POST /shutdown that comes during the scale-up.
+	// Write the boot IDs after the Cancel, so that a crash between the writes repeats the check.
+	// A later restart in this boot then does not revert a new Shutdown.
 	updated := request.DeepCopy()
 	updated.Status.BootIDs = r.currentBootIDs(ctx)
 	if err := r.Client.Status().Update(ctx, updated); err != nil {

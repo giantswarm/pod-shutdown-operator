@@ -17,7 +17,7 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
 )
 
-// start starts an operator. The cleanup of the test stops it.
+// start starts an operator and stops it at the test cleanup.
 func start(c operator.Config) func() {
 	stop, _ := startOperator(c)
 	DeferCleanup(stop)

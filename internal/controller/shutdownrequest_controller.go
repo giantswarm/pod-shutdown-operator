@@ -16,7 +16,6 @@ import (
 type ShutdownRequestReconciler struct {
 	Client client.Client
 
-	// APIReader reads from the API server, not from the cache.
 	APIReader client.Reader
 
 	// PollInterval is the requeue interval while pods end and while workloads become ready.
@@ -25,19 +24,15 @@ type ShutdownRequestReconciler struct {
 	// StatefulSetScaleUpDelay is the time that a StatefulSet scale-up waits after a forced delete of its pods.
 	StatefulSetScaleUpDelay time.Duration
 
-	// BootIDFile is the path of the file that holds the boot ID of the operator node.
+	// BootIDFile and NodeName are for the operator node.
 	BootIDFile string
-
-	// NodeName is the name of the operator node.
-	NodeName string
+	NodeName   string
 
 	// StaleLimit is the age after which a request with no phase is stale.
 	StaleLimit time.Duration
 
-	// Clock gives the age of a request.
 	Clock clock.PassiveClock
 
-	// bootChecked is true after the boot ID check at the start of the operator.
 	bootChecked bool
 
 	// The state in memory has no lock. One worker reconciles the request, because it is the only object.
@@ -65,7 +60,7 @@ func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// The first reconcile after the operator starts tells a power cycle from an operator restart.
+	// Once per process, tell a power cycle from an operator restart.
 	if !r.bootChecked {
 		if err := r.checkBoot(ctx, &request); err != nil {
 			return ctrl.Result{}, err
@@ -78,7 +73,7 @@ func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		(request.Status.Phase == shutdownv1alpha1.PhaseShuttingDown || request.Status.Phase == shutdownv1alpha1.PhaseComplete):
 		return ctrl.Result{}, r.startScaleUp(ctx, &request)
 	case request.Status.Phase == "" && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
-		// An old request must not stop the cluster after a power-on. With the clock behind the creation time, the age is below 0.
+		// An old request must not stop the cluster after a power-on. A negative age is not stale.
 		if r.Clock.Since(request.CreationTimestamp.Time) > r.StaleLimit {
 			return ctrl.Result{}, r.markStale(ctx, &request)
 		}

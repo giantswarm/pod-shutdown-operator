@@ -28,7 +28,7 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
 )
 
-// The node and the boot ID of an operator whose test does not set them.
+// The defaults of startOperator.
 const (
 	operatorNode   = "operator-node"
 	operatorBootID = "boot-1"
@@ -73,7 +73,7 @@ func startOperator(c operator.Config) (func(), ctrl.Manager) {
 	return func() { mgrCancel(); <-done }, mgr
 }
 
-// bootIDFile writes a boot ID file in a test directory and returns its path.
+// bootIDFile writes a boot ID file and returns its path.
 func bootIDFile(bootID string) string {
 	path := filepath.Join(GinkgoT().TempDir(), "boot_id")
 	// The kernel file ends with a line end.
@@ -81,7 +81,7 @@ func bootIDFile(bootID string) string {
 	return path
 }
 
-// createNode creates a Node with a boot ID in its status. The cleanup of the test deletes it.
+// createNode creates a Node with a boot ID. The test cleanup deletes it.
 func createNode(name, bootID string) {
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	Expect(k8sClient.Create(ctx, node)).To(Succeed())
