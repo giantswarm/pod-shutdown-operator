@@ -54,10 +54,20 @@ rules:
   - shutdown.giantswarm.io
   resources:
   - managedapplications
-  - shutdownrequests
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - shutdown.giantswarm.io
+  resources:
+  - shutdownrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
   - watch
 - apiGroups:
   - shutdown.giantswarm.io

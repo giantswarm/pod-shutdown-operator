@@ -2,12 +2,16 @@ package operator
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/giantswarm/pod-shutdown-operator/internal/api"
 	"github.com/giantswarm/pod-shutdown-operator/internal/controller"
 )
 
@@ -26,10 +30,17 @@ type Config struct {
 	// StatefulSetScaleUpDelay is the time that a StatefulSet scale-up waits after a forced delete of its pods.
 	// After a forced delete, the container can still run for some seconds.
 	StatefulSetScaleUpDelay time.Duration
+
+	// APIBindAddress is the address of the HTTP endpoint for the shutdown, cancel, and progress calls.
+	// Empty disables the endpoint.
+	APIBindAddress string
+
+	// APITokenFile is the path of the file that holds the token of the HTTP endpoint, for example from a mounted Secret.
+	APITokenFile string
 }
 
-// NewManager returns a manager with the ShutdownRequest controller.
-// With leader election, the controller runs only in the lease holder.
+// NewManager returns a manager with the ShutdownRequest controller and the HTTP endpoint.
+// With leader election, the controller runs only in the lease holder. The endpoint runs in every pod.
 func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	opts := c.Manager
 	opts.Scheme = NewScheme()
@@ -46,6 +57,30 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownRequest controller: %w", err)
+	}
+
+	if c.APIBindAddress != "" {
+		server := &api.Server{
+			Client:    client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+			Reader:    mgr.GetAPIReader(),
+			TokenFile: c.APITokenFile,
+		}
+		if err := mgr.Add(&manager.Server{
+			Name: "api",
+			// The timeouts close slow and idle connections, so that a client with no token cannot keep them open.
+			Server: &http.Server{
+				Addr:              c.APIBindAddress,
+				Handler:           server.Handler(),
+				ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout:       10 * time.Second,
+				WriteTimeout:      time.Minute,
+				IdleTimeout:       time.Minute,
+				MaxHeaderBytes:    16 << 10,
+			},
+			ShutdownTimeout: ptr.To(5 * time.Second),
+		}); err != nil {
+			return nil, fmt.Errorf("add the HTTP endpoint: %w", err)
+		}
 	}
 	return mgr, nil
 }

@@ -89,6 +89,37 @@ var _ = Describe("A scale-up from the record", func() {
 		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
 	})
 
+	It("returns a ScalingUp request to ShuttingDown on the action Shutdown and reuses the record", func() {
+		db := createDeployment(ns, "db", 1)
+		web := createDeployment(ns, "web", 2)
+		createApplication(ns, "db", workload(shutdownv1alpha1.WorkloadKindDeployment, "db"))
+		createApplication(ns, "web", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		setDependsOn(ns, "web", "db")
+		completeShutdown()
+		first := getRequest().Status
+		record := first.RecordedState
+
+		// db does not become ready, so web stays at 0. The wait is longer than 1s, the precision of the stored start time.
+		setAction(shutdownv1alpha1.ActionCancel)
+		Eventually(replicasOf(db)).Should(Equal(int32(1)))
+		Consistently(replicasOf(web), 1100*time.Millisecond).Should(BeZero())
+
+		setAction(shutdownv1alpha1.ActionShutdown)
+
+		Eventually(replicasOf(db)).Should(BeZero())
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+		request := getRequest()
+		Expect(request.Status.RecordedState).To(Equal(record))
+		Expect(request.Status.ScaleUpStartedAt).To(BeNil())
+		Expect(request.Status.ShutdownStartedAt.After(first.ShutdownStartedAt.Time)).To(BeTrue())
+
+		// The record still holds the count of web before the first shutdown, and not the 0 of the scale-up.
+		setAction(shutdownv1alpha1.ActionCancel)
+		Eventually(replicasOf(db)).Should(Equal(int32(1)))
+		markReady(db, 1)
+		Eventually(replicasOf(web)).Should(Equal(int32(2)))
+	})
+
 	It("does nothing on a cancel in a request with no phase", func() {
 		web := createDeployment(ns, "web", 2)
 		createApplication(ns, "shop", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
