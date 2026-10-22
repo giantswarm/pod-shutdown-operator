@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: scale up from the record on cancel
 - feat: stop and start applications in dependency order
 - feat: stop each application inside the time budget
+- feat: detect a power cycle at operator start
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
