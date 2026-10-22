@@ -41,19 +41,20 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	return nil
 }
 
-// reuseRecord returns a ScalingUp request to ShuttingDown in one status update. It keeps the record and
-// resets the start time, so the shutdown gets the whole budget again. It changes no workload.
+// reuseRecord returns a ScalingUp request to ShuttingDown with the same record. It changes no workload.
 // One worker reconciles the request, so the scale-up steps of an earlier reconcile have ended.
 func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
 	now := metav1.Now()
 	updated := request.DeepCopy()
-	updated.Status.Phase = shutdownv1alpha1.PhaseShuttingDown
-	updated.Status.ShutdownStartedAt = &now
-	updated.Status.ScaleUpStartedAt = nil
-	// The counts and the lists are for the new shutdown.
-	updated.Status.Stopped = 0
-	updated.Status.Failed = nil
-	updated.Status.Degraded = nil
+	// The new status keeps the fields from the start of the first shutdown. The new start time gives the whole budget again.
+	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
+		Phase:             shutdownv1alpha1.PhaseShuttingDown,
+		RecordedState:     request.Status.RecordedState,
+		BootIDs:           request.Status.BootIDs,
+		Unmanaged:         request.Status.Unmanaged,
+		ShutdownStartedAt: &now,
+		Total:             request.Status.Total,
+	}
 	if err := r.Client.Status().Update(ctx, updated); err != nil {
 		return fmt.Errorf("return to the shutdown: %w", err)
 	}
