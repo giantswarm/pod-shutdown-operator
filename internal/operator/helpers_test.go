@@ -5,6 +5,8 @@ package operator_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -14,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,6 +26,12 @@ import (
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
+)
+
+// The node and the boot ID of an operator whose test does not set them.
+const (
+	operatorNode   = "operator-node"
+	operatorBootID = "boot-1"
 )
 
 // startOperator starts an operator against the test API server. The stop function stops it and waits.
@@ -37,6 +46,19 @@ func startOperator(c operator.Config) (func(), ctrl.Manager) {
 	if c.FieldOwner == "" {
 		c.FieldOwner = "test-operator"
 	}
+	if c.NodeName == "" {
+		c.NodeName = operatorNode
+	}
+	// Each operator gets the same boot ID, so a restart is not a power cycle.
+	if c.BootIDFile == "" {
+		c.BootIDFile = bootIDFile(operatorBootID)
+	}
+	if c.StaleLimit == 0 {
+		c.StaleLimit = 5 * time.Minute
+	}
+	if c.Clock == nil {
+		c.Clock = clock.RealClock{}
+	}
 
 	mgr, err := operator.NewManager(cfg, c)
 	Expect(err).NotTo(HaveOccurred())
@@ -49,6 +71,23 @@ func startOperator(c operator.Config) (func(), ctrl.Manager) {
 		Expect(mgr.Start(mgrCtx)).To(Succeed())
 	}()
 	return func() { mgrCancel(); <-done }, mgr
+}
+
+// bootIDFile writes a boot ID file in a test directory and returns its path.
+func bootIDFile(bootID string) string {
+	path := filepath.Join(GinkgoT().TempDir(), "boot_id")
+	// The kernel file ends with a line end.
+	Expect(os.WriteFile(path, []byte(bootID+"\n"), 0o600)).To(Succeed())
+	return path
+}
+
+// createNode creates a Node with a boot ID in its status. The cleanup of the test deletes it.
+func createNode(name, bootID string) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	Expect(k8sClient.Create(ctx, node)).To(Succeed())
+	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, node)).To(Succeed()) })
+	node.Status.NodeInfo.BootID = bootID
+	Expect(k8sClient.Status().Update(ctx, node)).To(Succeed())
 }
 
 func newNamespace() string {

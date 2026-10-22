@@ -28,6 +28,9 @@ const (
 	PhaseRestored     Phase = "Restored"
 )
 
+// ReasonStale tells that the operator found the request with no phase after the stale limit, and changed nothing.
+const ReasonStale = "Stale"
+
 // ShutdownRequestSpec holds the intent of the caller and the time budget.
 type ShutdownRequestSpec struct {
 	// Action is the intent of the caller.
