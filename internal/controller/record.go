@@ -10,12 +10,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// startShutdown writes the record, the start time, and the phase ShuttingDown in one status update.
+// startShutdown writes the record, the boot IDs, the start time, and the phase ShuttingDown in one status update.
 // It changes no workload. The update uses the resource version of the request,
 // so a stale read fails with a conflict and the record is never written twice.
 func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
@@ -29,6 +30,7 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     record,
+		BootIDs:           r.currentBootIDs(ctx),
 		ShutdownStartedAt: &now,
 		Total:             int32(len(record.Applications)), //nolint:gosec // The number of applications is small.
 	}
@@ -47,10 +49,11 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 	now := metav1.Now()
 	updated := request.DeepCopy()
 	// The new status keeps the fields from the start of the first shutdown. The new start time gives the whole budget again.
+	// A power cycle can come before the reuse, so the boot IDs are read again.
 	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     request.Status.RecordedState,
-		BootIDs:           request.Status.BootIDs,
+		BootIDs:           r.currentBootIDs(ctx),
 		Unmanaged:         request.Status.Unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             request.Status.Total,
@@ -61,6 +64,18 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 	r.stop = stopState{startedAt: *updated.Status.ShutdownStartedAt, apps: map[string]time.Time{}}
 	// A later scale-up can start in the same second as this one, so its state must not come from this one.
 	r.scaleUp = scaleUpState{}
+	return nil
+}
+
+// markStale sets the phase Restored with the reason Stale.
+func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
+	updated := request.DeepCopy()
+	updated.Status.Phase = shutdownv1alpha1.PhaseRestored
+	updated.Status.Reason = shutdownv1alpha1.ReasonStale
+	if err := r.Client.Status().Update(ctx, updated); err != nil {
+		return fmt.Errorf("mark the request stale: %w", err)
+	}
+	ctrl.LoggerFrom(ctx).Info("Found a request with no phase after the stale limit, changes nothing", "createdAt", request.CreationTimestamp)
 	return nil
 }
 
