@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"time"
 
 	// Import all Kubernetes client auth plugins (for example OIDC) for out-of-cluster runs.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -23,9 +25,9 @@ const (
 var setupLog = ctrl.Log.WithName("setup")
 
 func main() {
-	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile string
+	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName string
 	var enableLeaderElection bool
-	var pollInterval, statefulSetScaleUpDelay time.Duration
+	var pollInterval, statefulSetScaleUpDelay, staleLimit time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
 		"The endpoint has no authentication, so keep it inside the cluster. The value 0 disables the metrics endpoint.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address of the probe endpoint.")
@@ -41,11 +43,28 @@ func main() {
 		"Empty disables the endpoint.")
 	flag.StringVar(&apiTokenFile, "api-token-file", "", "The path of the file that holds the token of the HTTP endpoint, "+
 		"for example from a mounted Secret. With no readable token, the endpoint refuses every call that needs a token.")
+	flag.StringVar(&bootIDFile, "boot-id-file", "/proc/sys/kernel/random/boot_id",
+		"The path of the file that holds the boot ID of the operator node. The operator compares it with the record to find a power cycle.")
+	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"),
+		"The name of the operator node, for example from the Downward API. The default is the value of NODE_NAME.")
+	flag.DurationVar(&staleLimit, "stale-limit", 5*time.Minute, "The age after which a request with no phase is stale. "+
+		"The operator then sets the phase Restored with the reason Stale, and changes nothing else.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// The node name is the key of the own boot ID in the record.
+	if nodeName == "" {
+		setupLog.Error(errors.New("the node name is empty"), "Set --node-name or NODE_NAME")
+		os.Exit(1)
+	}
+	// A limit of 0 or less makes every new request stale.
+	if staleLimit <= 0 {
+		setupLog.Error(errors.New("the stale limit is not above 0"), "Set --stale-limit to a positive duration")
+		os.Exit(1)
+	}
 
 	mgr, err := operator.NewManager(ctrl.GetConfigOrDie(), operator.Config{
 		Manager: ctrl.Options{
@@ -63,6 +82,10 @@ func main() {
 		StatefulSetScaleUpDelay: statefulSetScaleUpDelay,
 		APIBindAddress:          apiAddr,
 		APITokenFile:            apiTokenFile,
+		BootIDFile:              bootIDFile,
+		NodeName:                nodeName,
+		StaleLimit:              staleLimit,
+		Clock:                   clock.RealClock{},
 	})
 	if err != nil {
 		setupLog.Error(err, "Failed to create the manager")

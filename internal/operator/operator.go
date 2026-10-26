@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +38,16 @@ type Config struct {
 
 	// APITokenFile is the path of the file that holds the token of the HTTP endpoint, for example from a mounted Secret.
 	APITokenFile string
+
+	// BootIDFile and NodeName are for the operator node.
+	BootIDFile string
+	NodeName   string
+
+	// StaleLimit is the age after which a request with no phase is stale.
+	StaleLimit time.Duration
+
+	// Clock gives the age of a request, so that a test can set it.
+	Clock clock.PassiveClock
 }
 
 // NewManager returns a manager with the ShutdownRequest controller and the HTTP endpoint.
@@ -52,8 +63,13 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 
 	reconciler := &controller.ShutdownRequestReconciler{
 		Client:                  client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+		APIReader:               mgr.GetAPIReader(),
 		PollInterval:            c.PollInterval,
 		StatefulSetScaleUpDelay: c.StatefulSetScaleUpDelay,
+		BootIDFile:              c.BootIDFile,
+		NodeName:                c.NodeName,
+		StaleLimit:              c.StaleLimit,
+		Clock:                   c.Clock,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownRequest controller: %w", err)
