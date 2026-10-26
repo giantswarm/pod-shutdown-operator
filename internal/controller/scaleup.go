@@ -51,13 +51,16 @@ func (r *ShutdownRequestReconciler) startScaleUp(ctx context.Context, request *s
 // continueScaleUp scales the recorded workloads to their recorded counts in dependency order and waits
 // for readiness. An application starts when all its dependencies are ready or degraded, so each
 // dependency group runs by itself. Its readyTimeout starts when it starts. An application that is
-// not ready at its readyTimeout goes into status.degraded.
-// It sets the phase Restored when each application is ready or degraded.
+// not ready at its readyTimeout goes into status.degraded. At the global time limit, each remaining application
+// starts with no order, and each application that is not ready goes into status.degraded.
+// When each application is ready or degraded, it scales the Flux controllers back and sets the phase Restored.
 func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	startedAt := ptr.Deref(request.Status.ScaleUpStartedAt, metav1.Time{})
 	if r.scaleUp.apps == nil || !r.scaleUp.startedAt.Equal(&startedAt) {
 		r.scaleUp = scaleUpState{startedAt: startedAt, apps: map[string]*appScaleUp{}}
 	}
+	// The global time limit comes from the stored start time, so an operator restart does not start it again.
+	pastLimit := time.Since(startedAt.Time) >= r.ScaleUpTimeout
 
 	apps := request.Status.RecordedState.Applications
 	deps, err := r.dependencies(ctx, apps)
@@ -75,9 +78,9 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	// The loop repeats while an application becomes done, so that a chain can go past more than one step in one reconcile.
 	attempted := map[string]bool{}
 	// canStart returns true when the application is not yet ready or degraded, when this reconcile
-	// has not yet tried to start it, and when all its dependencies are ready or degraded.
+	// has not yet tried to start it, and when all its dependencies are ready or degraded or the global time limit has passed.
 	canStart := func(key string) bool {
-		return !done[key] && !attempted[key] && allIn(deps[key], done)
+		return !done[key] && !attempted[key] && (pastLimit || allIn(deps[key], done))
 	}
 	for progress := true; progress; {
 		progress = false
@@ -95,7 +98,10 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 			}
 			if !state.ready {
 				ready, err := r.startApplication(ctx, app)
-				if err != nil {
+				// Past the global time limit, a failed write must not keep Flux at 0, so the application becomes degraded.
+				if err != nil && pastLimit {
+					ctrl.LoggerFrom(ctx).Error(err, "Failed to start the application at the global time limit", "application", key)
+				} else if err != nil {
 					return ctrl.Result{}, err
 				}
 				state.ready = ready
@@ -110,7 +116,7 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 			if err != nil {
 				return ctrl.Result{}, err
 			}
-			if time.Since(state.startedAt) > timeout {
+			if time.Since(state.startedAt) > timeout || pastLimit {
 				degraded = append(degraded, key)
 				done[key] = true
 				progress = true
@@ -118,6 +124,13 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 		}
 	}
 	pending := len(done) < len(apps)
+
+	// Flux comes back last, so that it cannot revert the counts during the scale-up.
+	if !pending {
+		if err := r.startFlux(ctx, request.Status.RecordedState.FluxControllers); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	if len(degraded) != len(request.Status.Degraded) || !pending {
 		updated := request.DeepCopy()

@@ -104,6 +104,13 @@ func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv
 	slices.SortFunc(record.Applications, func(a, b shutdownv1alpha1.RecordedApplication) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
+
+	// The record comes before the Flux step, so that the scale-up restores the Flux replicas.
+	fluxControllers, err := r.recordFlux(ctx)
+	if err != nil {
+		return nil, err
+	}
+	record.FluxControllers = fluxControllers
 	return record, nil
 }
 

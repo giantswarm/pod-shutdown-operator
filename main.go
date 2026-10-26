@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	// Import all Kubernetes client auth plugins (for example OIDC) for out-of-cluster runs.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/utils/clock"
@@ -25,9 +28,9 @@ const (
 var setupLog = ctrl.Log.WithName("setup")
 
 func main() {
-	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName string
+	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName, fluxControllerList string
 	var enableLeaderElection bool
-	var pollInterval, statefulSetScaleUpDelay, staleLimit time.Duration
+	var pollInterval, statefulSetScaleUpDelay, staleLimit, fluxStopTimeout, scaleUpTimeout time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
 		"The endpoint has no authentication, so keep it inside the cluster. The value 0 disables the metrics endpoint.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address of the probe endpoint.")
@@ -49,6 +52,15 @@ func main() {
 		"The name of the operator node, for example from the Downward API. The default is the value of NODE_NAME.")
 	flag.DurationVar(&staleLimit, "stale-limit", 5*time.Minute, "The age after which a request with no phase is stale. "+
 		"The operator then sets the phase Restored with the reason Stale, and changes nothing else.")
+	flag.StringVar(&fluxControllerList, "flux-controllers", "flux-system/kustomize-controller,flux-system/helm-controller",
+		"The Flux controller Deployments, as a comma-separated list of namespace/name. The operator scales them to 0 "+
+			"before it stops an application, and back after the scale-up. Empty disables the Flux step.")
+	flag.DurationVar(&fluxStopTimeout, "flux-stop-timeout", 30*time.Second,
+		"The longest time that the shutdown waits for the pods of the Flux controllers to end. "+
+			"Keep it shorter than the termination grace period of the controllers.")
+	flag.DurationVar(&scaleUpTimeout, "scale-up-timeout", 30*time.Minute,
+		"The global time limit of the scale-up. At the limit, the operator starts each remaining application with no order, "+
+			"and scales the Flux controllers back.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -63,6 +75,21 @@ func main() {
 	// A limit of 0 or less makes every new request stale.
 	if staleLimit <= 0 {
 		setupLog.Error(errors.New("the stale limit is not above 0"), "Set --stale-limit to a positive duration")
+		os.Exit(1)
+	}
+	// A negative limit moves the start of the groups before the start of the shutdown.
+	if fluxStopTimeout < 0 {
+		setupLog.Error(errors.New("the Flux stop timeout is below 0"), "Set --flux-stop-timeout to 0 or a positive duration")
+		os.Exit(1)
+	}
+	// A limit of 0 or less starts every application at once, with no order.
+	if scaleUpTimeout <= 0 {
+		setupLog.Error(errors.New("the scale-up timeout is not above 0"), "Set --scale-up-timeout to a positive duration")
+		os.Exit(1)
+	}
+	fluxControllers, err := parseFluxControllers(fluxControllerList)
+	if err != nil {
+		setupLog.Error(err, "Set --flux-controllers to a comma-separated list of namespace/name")
 		os.Exit(1)
 	}
 
@@ -80,6 +107,9 @@ func main() {
 		PollInterval:            pollInterval,
 		FieldOwner:              fieldOwner,
 		StatefulSetScaleUpDelay: statefulSetScaleUpDelay,
+		FluxControllers:         fluxControllers,
+		FluxStopTimeout:         fluxStopTimeout,
+		ScaleUpTimeout:          scaleUpTimeout,
 		APIBindAddress:          apiAddr,
 		APITokenFile:            apiTokenFile,
 		BootIDFile:              bootIDFile,
@@ -106,4 +136,20 @@ func main() {
 		setupLog.Error(err, "Failed to run the manager")
 		os.Exit(1)
 	}
+}
+
+// parseFluxControllers parses a comma-separated list of namespace/name. An empty list gives no Flux controller.
+func parseFluxControllers(list string) ([]types.NamespacedName, error) {
+	if list == "" {
+		return nil, nil
+	}
+	var controllers []types.NamespacedName
+	for entry := range strings.SplitSeq(list, ",") {
+		namespace, name, found := strings.Cut(strings.TrimSpace(entry), "/")
+		if !found || namespace == "" || name == "" || strings.Contains(name, "/") {
+			return nil, fmt.Errorf("the Flux controller %q is not namespace/name", entry)
+		}
+		controllers = append(controllers, types.NamespacedName{Namespace: namespace, Name: name})
+	}
+	return controllers, nil
 }

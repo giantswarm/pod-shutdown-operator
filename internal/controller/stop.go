@@ -49,6 +49,9 @@ type stopState struct {
 
 	// apps holds the start time of each application by key. It is nil when this process did not start the shutdown.
 	apps map[string]time.Time
+
+	// fluxStopped is true when the Flux step has ended.
+	fluxStopped bool
 }
 
 // forceAt returns the time of the forced stop of an application.
@@ -70,8 +73,9 @@ func (s *stopState) forceAt(key string, times stopTimes, now time.Time) time.Tim
 	return times.deadline
 }
 
-// continueShutdown scales the recorded workloads to 0 in dependency order and counts the applications whose pods
-// have ended. It sets the phase Complete when all applications have a final state: stopped or failed.
+// continueShutdown scales the recorded Flux controllers to 0 first. Then it scales the recorded workloads to 0 in
+// dependency order and counts the applications whose pods have ended. It sets the phase Complete when all
+// applications have a final state: stopped or failed.
 func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	// The workloads come from the record. dependsOn and gracePeriod come from the ManagedApplications.
 	apps := request.Status.RecordedState.Applications
@@ -96,8 +100,26 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	// No validation stops a negative safety margin, which would move the end past the budget.
 	end := startedAt.Add(ptr.Deref(request.Spec.Budget, metav1.Duration{Duration: defaultBudget}).Duration -
 		max(ptr.Deref(request.Spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration, 0))
-	// The dependency groups start when the shutdown starts.
-	times := planStopTimes(keys, deps, gracePeriods, startedAt.Time, end)
+	// The Flux step must not use time past the end of the budget.
+	fluxLimit := startedAt.Add(r.FluxStopTimeout)
+	if fluxLimit.After(end) {
+		fluxLimit = end
+	}
+	// Flux must not revert a scale-down, so no application changes before the Flux step ends.
+	fluxControllers := request.Status.RecordedState.FluxControllers
+	if !r.stop.fluxStopped {
+		if !r.stopFlux(ctx, fluxControllers, fluxLimit) {
+			return ctrl.Result{RequeueAfter: r.PollInterval}, nil
+		}
+		r.stop.fluxStopped = true
+	}
+	// The dependency groups start after the Flux step. The plan uses the Flux time limit and not the real end
+	// of the step, so that an operator restart does not change the plan.
+	groupsStart := startedAt.Time
+	if len(fluxControllers) > 0 {
+		groupsStart = fluxLimit
+	}
+	times := planStopTimes(keys, deps, gracePeriods, groupsStart, end)
 	// An application stops after its dependents, and a cycle stops as one step.
 	reverse := dependents(cyclesAsSteps(deps))
 	now := time.Now()

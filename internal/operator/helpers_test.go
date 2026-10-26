@@ -59,6 +59,10 @@ func startOperator(c operator.Config) (func(), ctrl.Manager) {
 	if c.Clock == nil {
 		c.Clock = clock.RealClock{}
 	}
+	// A global time limit of 0 starts every application at once, with no order.
+	if c.ScaleUpTimeout == 0 {
+		c.ScaleUpTimeout = 5 * time.Minute
+	}
 
 	mgr, err := operator.NewManager(cfg, c)
 	Expect(err).NotTo(HaveOccurred())
