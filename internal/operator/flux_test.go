@@ -31,8 +31,7 @@ var _ = Describe("The Flux controllers", func() {
 		stop            func()
 	)
 
-	// startWithFlux starts an operator that scales the two Flux controllers of the test.
-	// The setting also lists a Flux controller that does not exist, which the operator skips.
+	// startWithFlux starts an operator with the two Flux controllers of the test and one that does not exist.
 	startWithFlux := func(c operator.Config) {
 		c.FluxControllers = []types.NamespacedName{
 			{Namespace: fluxNS, Name: "kustomize-controller"},

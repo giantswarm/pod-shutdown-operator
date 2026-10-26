@@ -73,9 +73,8 @@ func (s *stopState) forceAt(key string, times stopTimes, now time.Time) time.Tim
 	return times.deadline
 }
 
-// continueShutdown scales the recorded Flux controllers to 0 first. Then it scales the recorded workloads to 0 in
-// dependency order and counts the applications whose pods have ended. It sets the phase Complete when all
-// applications have a final state: stopped or failed.
+// continueShutdown scales the recorded workloads to 0 in dependency order and counts the applications whose pods
+// have ended. It sets the phase Complete when all applications have a final state: stopped or failed.
 func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	// The workloads come from the record. dependsOn and gracePeriod come from the ManagedApplications.
 	apps := request.Status.RecordedState.Applications
@@ -113,8 +112,7 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 		}
 		r.stop.fluxStopped = true
 	}
-	// The dependency groups start after the Flux step. The plan uses the Flux time limit and not the real end
-	// of the step, so that an operator restart does not change the plan.
+	// The groups start at the Flux limit, not at the real end of the Flux step, so a restart does not change the plan.
 	groupsStart := startedAt.Time
 	if len(fluxControllers) > 0 {
 		groupsStart = fluxLimit

@@ -10,8 +10,7 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// recordFlux reads the replicas of each configured Flux controller Deployment.
-// It skips a Flux controller that does not exist.
+// recordFlux returns the replicas of each configured Flux controller that exists.
 func (r *ShutdownRequestReconciler) recordFlux(ctx context.Context) ([]shutdownv1alpha1.RecordedFluxController, error) {
 	var record []shutdownv1alpha1.RecordedFluxController
 	for _, c := range r.FluxControllers {
@@ -27,15 +26,15 @@ func (r *ShutdownRequestReconciler) recordFlux(ctx context.Context) ([]shutdownv
 	return record, nil
 }
 
-// stopFlux scales the recorded Flux controllers to 0. It returns true when no pod of them remains,
-// or when the time limit has passed. It does not delete the pods, and an error does not stop the shutdown.
+// stopFlux scales the recorded Flux controllers to 0. It returns true when no Flux pod remains or the limit has passed.
 func (r *ShutdownRequestReconciler) stopFlux(ctx context.Context, controllers []shutdownv1alpha1.RecordedFluxController, limit time.Time) bool {
 	log := ctrl.LoggerFrom(ctx)
 	stopped := true
 	for _, c := range controllers {
 		w := shutdownv1alpha1.RecordedWorkload{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: c.Name}
+		// The Flux step does not delete the Flux pods.
 		ended, err := r.stopWorkload(ctx, c.Namespace, w, false)
-		// The next poll tries again, up to the time limit.
+		// An error does not stop the shutdown. The next poll tries again, up to the time limit.
 		if err != nil {
 			log.Error(err, "Failed to stop the Flux controller", "controller", appKey(c.Namespace, c.Name))
 		}

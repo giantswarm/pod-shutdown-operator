@@ -39,8 +39,7 @@ type Config struct {
 	// FluxStopTimeout is the longest time that the shutdown waits for the pods of the Flux controllers to end.
 	FluxStopTimeout time.Duration
 
-	// ScaleUpTimeout is the global time limit of the scale-up. At the limit, the operator starts each remaining
-	// application with no order, and scales the Flux controllers back.
+	// ScaleUpTimeout is the global time limit of the scale-up. At the limit, the remaining applications and Flux start.
 	ScaleUpTimeout time.Duration
 
 	// APIBindAddress is the address of the HTTP endpoint for the shutdown, cancel, and progress calls.
