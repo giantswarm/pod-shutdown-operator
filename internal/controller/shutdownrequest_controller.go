@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,6 +24,15 @@ type ShutdownRequestReconciler struct {
 
 	// StatefulSetScaleUpDelay is the time that a StatefulSet scale-up waits after a forced delete of its pods.
 	StatefulSetScaleUpDelay time.Duration
+
+	// FluxControllers are the Flux controller Deployments that the operator scales to 0 before it stops an application.
+	FluxControllers []types.NamespacedName
+
+	// FluxStopTimeout is the longest time that the shutdown waits for the pods of the Flux controllers to end.
+	FluxStopTimeout time.Duration
+
+	// ScaleUpTimeout is the global time limit of the scale-up.
+	ScaleUpTimeout time.Duration
 
 	// BootIDFile and NodeName are for the operator node.
 	BootIDFile string

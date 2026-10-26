@@ -49,6 +49,9 @@ type stopState struct {
 
 	// apps holds the start time of each application by key. It is nil when this process did not start the shutdown.
 	apps map[string]time.Time
+
+	// fluxStopped is true when the Flux step has ended.
+	fluxStopped bool
 }
 
 // forceAt returns the time of the forced stop of an application.
@@ -96,8 +99,25 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	// No validation stops a negative safety margin, which would move the end past the budget.
 	end := startedAt.Add(ptr.Deref(request.Spec.Budget, metav1.Duration{Duration: defaultBudget}).Duration -
 		max(ptr.Deref(request.Spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration, 0))
-	// The dependency groups start when the shutdown starts.
-	times := planStopTimes(keys, deps, gracePeriods, startedAt.Time, end)
+	// The Flux step must not use time past the end of the budget.
+	fluxLimit := startedAt.Add(r.FluxStopTimeout)
+	if fluxLimit.After(end) {
+		fluxLimit = end
+	}
+	// Flux must not revert a scale-down, so no application changes before the Flux step ends.
+	fluxControllers := request.Status.RecordedState.FluxControllers
+	if !r.stop.fluxStopped {
+		if !r.stopFlux(ctx, fluxControllers, fluxLimit) {
+			return ctrl.Result{RequeueAfter: r.PollInterval}, nil
+		}
+		r.stop.fluxStopped = true
+	}
+	// The groups start at the Flux limit, not at the real end of the Flux step, so a restart does not change the plan.
+	groupsStart := startedAt.Time
+	if len(fluxControllers) > 0 {
+		groupsStart = fluxLimit
+	}
+	times := planStopTimes(keys, deps, gracePeriods, groupsStart, end)
 	// An application stops after its dependents, and a cycle stops as one step.
 	reverse := dependents(cyclesAsSteps(deps))
 	now := time.Now()

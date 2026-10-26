@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
@@ -31,6 +32,15 @@ type Config struct {
 	// StatefulSetScaleUpDelay is the time that a StatefulSet scale-up waits after a forced delete of its pods.
 	// After a forced delete, the container can still run for some seconds.
 	StatefulSetScaleUpDelay time.Duration
+
+	// FluxControllers are the Flux controller Deployments that the operator scales to 0 before it stops an application.
+	FluxControllers []types.NamespacedName
+
+	// FluxStopTimeout is the longest time that the shutdown waits for the pods of the Flux controllers to end.
+	FluxStopTimeout time.Duration
+
+	// ScaleUpTimeout is the global time limit of the scale-up. At the limit, the remaining applications and Flux start.
+	ScaleUpTimeout time.Duration
 
 	// APIBindAddress is the address of the HTTP endpoint for the shutdown, cancel, and progress calls.
 	// Empty disables the endpoint.
@@ -66,6 +76,9 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		APIReader:               mgr.GetAPIReader(),
 		PollInterval:            c.PollInterval,
 		StatefulSetScaleUpDelay: c.StatefulSetScaleUpDelay,
+		FluxControllers:         c.FluxControllers,
+		FluxStopTimeout:         c.FluxStopTimeout,
+		ScaleUpTimeout:          c.ScaleUpTimeout,
 		BootIDFile:              c.BootIDFile,
 		NodeName:                c.NodeName,
 		StaleLimit:              c.StaleLimit,
