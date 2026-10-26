@@ -184,6 +184,11 @@ func (in *RecordedWorkload) DeepCopyInto(out *RecordedWorkload) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.Started != nil {
+		in, out := &in.Started, &out.Started
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Suspend != nil {
 		in, out := &in.Suspend, &out.Suspend
 		*out = new(bool)

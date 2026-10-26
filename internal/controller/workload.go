@@ -9,7 +9,7 @@ import (
 )
 
 // newScalable returns an empty object for a kind that the operator scales.
-// It returns false for VirtualMachines and CronJobs, which a later slice handles.
+// It returns false for VirtualMachines and CronJobs, which have their own steps.
 func newScalable(kind shutdownv1alpha1.WorkloadKind) (client.Object, bool) {
 	switch kind {
 	case shutdownv1alpha1.WorkloadKindDeployment:

@@ -58,6 +58,10 @@ type Config struct {
 
 	// Clock gives the age of a request, so that a test can set it.
 	Clock clock.PassiveClock
+
+	// VirtualMachineActions calls the stop and start subresources of KubeVirt. Nil calls the KubeVirt API.
+	// A test sets a stub, because envtest cannot serve the subresources.
+	VirtualMachineActions controller.VirtualMachineActions
 }
 
 // NewManager returns a manager with the ShutdownRequest controller and the HTTP endpoint.
@@ -71,6 +75,14 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		return nil, fmt.Errorf("create manager: %w", err)
 	}
 
+	vmActions := c.VirtualMachineActions
+	if vmActions == nil {
+		vmActions, err = controller.NewVirtualMachineActions(restConfig, mgr.GetHTTPClient())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	reconciler := &controller.ShutdownRequestReconciler{
 		Client:                  client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
 		APIReader:               mgr.GetAPIReader(),
@@ -79,6 +91,7 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		FluxControllers:         c.FluxControllers,
 		FluxStopTimeout:         c.FluxStopTimeout,
 		ScaleUpTimeout:          c.ScaleUpTimeout,
+		VirtualMachines:         vmActions,
 		BootIDFile:              c.BootIDFile,
 		NodeName:                c.NodeName,
 		StaleLimit:              c.StaleLimit,
