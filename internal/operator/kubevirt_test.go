@@ -410,4 +410,25 @@ var _ = Describe("KubeVirt VirtualMachines", func() {
 		Expect(actions.callsOf()).To(Equal([]vmCall{{Subresource: "start", Key: ns + "/manual-on"}}))
 		Expect(vmiExists(ns, "manual-off")()).To(BeFalse())
 	})
+
+	It("starts a RerunOnFailure VM that ran through the start subresource", func() {
+		// KubeVirt does not start a RerunOnFailure VM again when its status already has the run strategy,
+		// for example after a restore while the old VMI was in deletion.
+		createVM(ns, "rerun-on", map[string]any{"runStrategy": "RerunOnFailure"})
+		createVMI(ns, "rerun-on")
+		createApplication(ns, "vms", vmWorkload("rerun-on"))
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+		Eventually(vmSpecOf(ns, "rerun-on")).Should(Equal(map[string]any{"runStrategy": "Halted"}))
+		deleteVMI(ns, "rerun-on")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(vmSpecOf(ns, "rerun-on")).Should(Equal(map[string]any{"runStrategy": "RerunOnFailure"}))
+		Eventually(actions.callsOf).Should(Equal([]vmCall{{Subresource: "start", Key: ns + "/rerun-on"}}))
+
+		setVMReady(ns, "rerun-on")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(actions.callsOf()).To(Equal([]vmCall{{Subresource: "start", Key: ns + "/rerun-on"}}))
+	})
 })

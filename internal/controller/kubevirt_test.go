@@ -18,14 +18,14 @@ import (
 
 // subresourceCall is one request that the fake KubeVirt API server got.
 type subresourceCall struct {
-	method, path, body string
+	method, path, query, body string
 }
 
 func TestVirtualMachineActionsCallTheSubresources(t *testing.T) {
 	var calls []subresourceCall
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		calls = append(calls, subresourceCall{method: r.Method, path: r.URL.Path, body: string(body)})
+		calls = append(calls, subresourceCall{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, body: string(body)})
 		// KubeVirt answers a stop of a VM that does not run with a Conflict.
 		if r.URL.Path == "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/off/stop" {
 			w.Header().Set("Content-Type", "application/json")
@@ -52,10 +52,11 @@ func TestVirtualMachineActionsCallTheSubresources(t *testing.T) {
 		t.Errorf("Stop of a VM that does not run: got %v, want a Conflict", err)
 	}
 
+	// The timeout query tells that each call has the time limit. The HTTP client of the manager has none.
 	want := []subresourceCall{
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/stop", body: `{"gracePeriod":0}`},
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/start", body: `{}`},
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/off/stop", body: `{"gracePeriod":0}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/stop", query: "timeout=10s", body: `{"gracePeriod":0}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/start", query: "timeout=10s", body: `{}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/off/stop", query: "timeout=10s", body: `{"gracePeriod":0}`},
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("got calls %+v, want %+v", calls, want)

@@ -37,8 +37,6 @@ func NewVirtualMachineActions(config *rest.Config, httpClient *http.Client) (Vir
 	c.GroupVersion = &schema.GroupVersion{Group: "subresources.kubevirt.io", Version: "v1"}
 	// The codecs decode the Status of an error response, so that a Conflict is an API status error.
 	c.NegotiatedSerializer = clientgoscheme.Codecs.WithoutConversion()
-	// A slow virt-api must not hold the single worker, so that other forced stops keep their deadlines.
-	c.Timeout = subresourceTimeout
 	restClient, err := rest.RESTClientForConfigAndClient(c, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("create the KubeVirt subresource client: %w", err)
@@ -59,7 +57,10 @@ func (a *subresourceActions) Start(ctx context.Context, namespace, name string) 
 }
 
 func (a *subresourceActions) put(ctx context.Context, namespace, name, subresource string, body []byte) error {
+	// A slow virt-api must not hold the single worker, so that other forced stops keep their deadlines.
+	// The request sets the time limit, because the REST client ignores the Timeout of its config.
 	return a.client.Put().
+		Timeout(subresourceTimeout).
 		Namespace(namespace).
 		Resource("virtualmachines").
 		Name(name).
@@ -73,6 +74,8 @@ const (
 	runStrategyAlways = "Always"
 	runStrategyHalted = "Halted"
 	runStrategyManual = "Manual"
+
+	runStrategyRerunOnFailure = "RerunOnFailure"
 
 	// subresourceTimeout is the time limit of one call to the start or the stop subresource.
 	subresourceTimeout = 10 * time.Second
@@ -235,7 +238,8 @@ func forceStopped(vmi *unstructured.Unstructured) bool {
 
 // startVM sets the field of a VM to its recorded value. It returns true when the VM is ready, or when it
 // did not run at the shutdown. The Manual run strategy does not start a VM, so for a Manual VM that ran,
-// it calls the start subresource.
+// it calls the start subresource. It also does this for a RerunOnFailure VM, because KubeVirt does not start
+// it again when its status already has the run strategy, for example after a restore during a VMI deletion.
 func (r *ShutdownRequestReconciler) startVM(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (bool, error) {
 	// The patch removes the other field, because KubeVirt rejects a VM with both fields.
 	restore := fmt.Appendf(nil, `{"spec":{"runStrategy":%q,"running":null}}`, ptr.Deref(w.RunStrategy, runStrategyHalted))
@@ -261,7 +265,7 @@ func (r *ShutdownRequestReconciler) startVM(ctx context.Context, namespace strin
 	if vmi != nil {
 		return vmi.GetDeletionTimestamp() == nil && vmReady(vm), nil
 	}
-	if ptr.Deref(w.RunStrategy, "") != runStrategyManual {
+	if strategy := ptr.Deref(w.RunStrategy, ""); strategy != runStrategyManual && strategy != runStrategyRerunOnFailure {
 		return false, nil
 	}
 
