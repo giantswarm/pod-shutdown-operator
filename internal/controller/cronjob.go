@@ -42,7 +42,6 @@ func (r *ShutdownRequestReconciler) recordCronJob(ctx context.Context, namespace
 func (r *ShutdownRequestReconciler) suspendCronJob(ctx context.Context, namespace, name string) (bool, error) {
 	kind := shutdownv1alpha1.WorkloadKindCronJob
 	cronJob := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name}}
-	// The API server does not store a patch that changes nothing.
 	err := retryOnce(func() error { return r.Client.Patch(ctx, cronJob, suspendPatch(true)) })
 	if apierrors.IsNotFound(err) {
 		return true, nil

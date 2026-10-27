@@ -26,7 +26,6 @@ type VirtualMachineActions interface {
 	// Stop stops a VM with a grace period in seconds.
 	Stop(ctx context.Context, namespace, name string, gracePeriod int64) error
 
-	// Start starts a VM.
 	Start(ctx context.Context, namespace, name string) error
 }
 
@@ -57,8 +56,7 @@ func (a *subresourceActions) Start(ctx context.Context, namespace, name string) 
 }
 
 func (a *subresourceActions) put(ctx context.Context, namespace, name, subresource string, body []byte) error {
-	// A slow virt-api must not hold the single worker, so that other forced stops keep their deadlines.
-	// The request sets the time limit, because the REST client ignores the Timeout of its config.
+	// A slow virt-api must not hold the single worker. The REST client ignores the Timeout of its config.
 	return a.client.Put().
 		Timeout(subresourceTimeout).
 		Namespace(namespace).
@@ -77,17 +75,15 @@ const (
 
 	runStrategyRerunOnFailure = "RerunOnFailure"
 
-	// subresourceTimeout is the time limit of one call to the start or the stop subresource.
 	subresourceTimeout = 10 * time.Second
 )
 
 // strategyTellsState returns true when the run strategy alone tells if the VM runs.
-// With another run strategy, for example Manual, RerunOnFailure, or Once, the VM can run or not.
 func strategyTellsState(strategy string) bool {
 	return strategy == runStrategyAlways || strategy == runStrategyHalted
 }
 
-// newKubeVirtObject returns a KubeVirt object of a kind. The operator does not import the KubeVirt API types.
+// newKubeVirtObject returns an unstructured KubeVirt object.
 // The client does not cache unstructured objects, so a read goes to the API server.
 func newKubeVirtObject(kind, namespace, name string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
@@ -103,7 +99,6 @@ func isAbsent(err error) bool {
 }
 
 // recordVM returns the recorded state of a VM: the field that it uses, with its value.
-// When the run strategy alone does not tell if the VM runs, it also records this.
 // It returns false when the VM does not exist.
 func (r *ShutdownRequestReconciler) recordVM(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
 	vm := newKubeVirtObject("VirtualMachine", namespace, ref.Name)
@@ -167,8 +162,7 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return false, fmt.Errorf("get %s %s/%s: %w", kind, namespace, name, err)
 	}
 
-	// The patch sets the field that the VM uses now, because KubeVirt rejects a VM with both fields.
-	// KubeVirt treats a VM with neither field as Halted.
+	// KubeVirt rejects a VM with both fields, so the patch sets the field that the VM uses now.
 	strategy, _, _ := unstructured.NestedString(vm.Object, "spec", "runStrategy")
 	strategy = cmp.Or(strategy, runStrategyHalted)
 	halted := strategy == runStrategyHalted
@@ -211,9 +205,8 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return true, nil
 	}
 	err = retryOnce(func() error { return r.VirtualMachines.Stop(ctx, namespace, name, 0) })
-	// KubeVirt returns a Conflict when the VM does not run. An older KubeVirt also returns a Conflict when the
-	// VMI has no grace period, but it sets the VMI grace period to 0 first. Thus a new read of the VMI tells
-	// if the stop is in effect. If it is not, the error fails the application.
+	// KubeVirt returns a Conflict when the VM does not run. An older KubeVirt also does this after it sets
+	// the VMI grace period to 0. A new read of the VMI tells if the stop is in effect.
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
 		vmi, getErr := r.runningVMI(ctx, namespace, name)
 		if getErr == nil && (vmi == nil || forceStopped(vmi)) {
@@ -237,9 +230,7 @@ func forceStopped(vmi *unstructured.Unstructured) bool {
 }
 
 // startVM sets the field of a VM to its recorded value. It returns true when the VM is ready, or when it
-// did not run at the shutdown. The Manual run strategy does not start a VM, so for a Manual VM that ran,
-// it calls the start subresource. It also does this for a RerunOnFailure VM, because KubeVirt does not start
-// it again when its status already has the run strategy, for example after a restore during a VMI deletion.
+// did not run at the shutdown.
 func (r *ShutdownRequestReconciler) startVM(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (bool, error) {
 	// The patch removes the other field, because KubeVirt rejects a VM with both fields.
 	restore := fmt.Appendf(nil, `{"spec":{"runStrategy":%q,"running":null}}`, ptr.Deref(w.RunStrategy, runStrategyHalted))
@@ -265,6 +256,7 @@ func (r *ShutdownRequestReconciler) startVM(ctx context.Context, namespace strin
 	if vmi != nil {
 		return vmi.GetDeletionTimestamp() == nil && vmReady(vm), nil
 	}
+	// KubeVirt does not start a Manual VM, or a RerunOnFailure VM whose status already has this run strategy.
 	if strategy := ptr.Deref(w.RunStrategy, ""); strategy != runStrategyManual && strategy != runStrategyRerunOnFailure {
 		return false, nil
 	}

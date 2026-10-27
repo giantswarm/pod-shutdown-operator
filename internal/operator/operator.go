@@ -60,7 +60,6 @@ type Config struct {
 	Clock clock.PassiveClock
 
 	// VirtualMachineActions calls the stop and start subresources of KubeVirt. Nil calls the KubeVirt API.
-	// A test sets a stub, because envtest cannot serve the subresources.
 	VirtualMachineActions controller.VirtualMachineActions
 }
 
