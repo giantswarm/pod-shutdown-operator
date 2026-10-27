@@ -152,6 +152,11 @@ spec:
                                 description: Running is the running field of a VirtualMachine
                                   that uses it.
                                 type: boolean
+                              started:
+                                description: |-
+                                  Started tells if a VirtualMachine ran at the start of the shutdown, when its run strategy does not tell this,
+                                  for example Manual.
+                                type: boolean
                               suspend:
                                 description: Suspend is the original suspend value
                                   of a CronJob.

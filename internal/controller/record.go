@@ -79,7 +79,7 @@ func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shut
 	return nil
 }
 
-// recordState reads the replicas of each listed Deployment and StatefulSet.
+// recordState reads the state of each listed workload.
 // It skips a listed workload that does not exist.
 func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedState, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
@@ -114,9 +114,14 @@ func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv
 	return record, nil
 }
 
-// recordWorkload returns the recorded state of one workload. It returns false when the operator
-// does not scale the kind, or when the workload does not exist.
+// recordWorkload returns the recorded state of one workload. It returns false when the workload does not exist.
 func (r *ShutdownRequestReconciler) recordWorkload(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
+	switch ref.Kind {
+	case shutdownv1alpha1.WorkloadKindVirtualMachine:
+		return r.recordVM(ctx, namespace, ref)
+	case shutdownv1alpha1.WorkloadKindCronJob:
+		return r.recordCronJob(ctx, namespace, ref)
+	}
 	obj, ok := newScalable(ref.Kind)
 	if !ok {
 		return shutdownv1alpha1.RecordedWorkload{}, false, nil

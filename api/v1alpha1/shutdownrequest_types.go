@@ -68,6 +68,11 @@ type RecordedWorkload struct {
 	// +optional
 	Running *bool `json:"running,omitempty"`
 
+	// Started tells if a VirtualMachine ran at the start of the shutdown, when its run strategy does not tell this,
+	// for example Manual.
+	// +optional
+	Started *bool `json:"started,omitempty"`
+
 	// Suspend is the original suspend value of a CronJob.
 	// +optional
 	Suspend *bool `json:"suspend,omitempty"`

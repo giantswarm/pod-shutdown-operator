@@ -219,6 +219,12 @@ func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shu
 // stopWorkload scales a workload to 0. It returns true when no pod of the workload remains.
 // With force, it deletes the remaining pods with a grace period of 0.
 func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload, force bool) (bool, error) {
+	switch w.Kind {
+	case shutdownv1alpha1.WorkloadKindVirtualMachine:
+		return r.stopVM(ctx, namespace, w.Name, force)
+	case shutdownv1alpha1.WorkloadKindCronJob:
+		return r.suspendCronJob(ctx, namespace, w.Name)
+	}
 	obj, ok := newScalable(w.Kind)
 	if !ok {
 		return true, nil

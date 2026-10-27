@@ -34,6 +34,9 @@ type ShutdownRequestReconciler struct {
 	// ScaleUpTimeout is the global time limit of the scale-up.
 	ScaleUpTimeout time.Duration
 
+	// VirtualMachines calls the stop and start subresources of KubeVirt.
+	VirtualMachines VirtualMachineActions
+
 	// BootIDFile and NodeName are for the operator node.
 	BootIDFile string
 	NodeName   string
@@ -58,6 +61,10 @@ type ShutdownRequestReconciler struct {
 // +kubebuilder:rbac:groups=shutdown.giantswarm.io,resources=managedapplications,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;patch
+// +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachineinstances,verbs=get
+// +kubebuilder:rbac:groups=subresources.kubevirt.io,resources=virtualmachines/start;virtualmachines/stop,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=list
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete

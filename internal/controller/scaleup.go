@@ -170,6 +170,12 @@ func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app sh
 // After a cancel in ShuttingDown, the cache can still hold the count before the scale to 0.
 // The API server does not store a patch that changes nothing.
 func (r *ShutdownRequestReconciler) startWorkload(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (bool, error) {
+	switch w.Kind {
+	case shutdownv1alpha1.WorkloadKindVirtualMachine:
+		return r.startVM(ctx, namespace, w)
+	case shutdownv1alpha1.WorkloadKindCronJob:
+		return r.restoreCronJob(ctx, namespace, w)
+	}
 	obj, ok := newScalable(w.Kind)
 	if !ok {
 		return true, nil
