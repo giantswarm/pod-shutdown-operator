@@ -53,10 +53,11 @@ func TestVirtualMachineActionsCallTheSubresources(t *testing.T) {
 	}
 
 	// The timeout query tells that each call has the time limit. The HTTP client of the manager has none.
+	const timeout = "timeout=10s"
 	want := []subresourceCall{
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/stop", query: "timeout=10s", body: `{"gracePeriod":0}`},
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/start", query: "timeout=10s", body: `{}`},
-		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/off/stop", query: "timeout=10s", body: `{"gracePeriod":0}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/stop", query: timeout, body: `{"gracePeriod":0}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/vm/start", query: timeout, body: `{}`},
+		{method: http.MethodPut, path: "/apis/subresources.kubevirt.io/v1/namespaces/ns/virtualmachines/off/stop", query: timeout, body: `{"gracePeriod":0}`},
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("got calls %+v, want %+v", calls, want)
