@@ -13,15 +13,12 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// ShutdownPlanReconciler writes the plan of a ShutdownPlan once, and deletes the ShutdownPlan after its time to live.
-// It writes no other object. It runs only in the lease holder.
+// ShutdownPlanReconciler writes the plan of a ShutdownPlan once and deletes it after TTL. It writes no other object.
 type ShutdownPlanReconciler struct {
-	Client client.Client
-
-	// FluxControllers are the Flux controller Deployments that a shutdown scales to 0 before it stops an application.
+	Client          client.Client
 	FluxControllers []types.NamespacedName
 
-	// FluxStopTimeout is the longest time that a shutdown waits for the pods of the Flux controllers to end.
+	// FluxStopTimeout sets the start of the groups in the plan.
 	FluxStopTimeout time.Duration
 
 	// TTL is the age after which the operator deletes a ShutdownPlan.

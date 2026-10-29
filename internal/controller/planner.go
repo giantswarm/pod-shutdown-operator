@@ -18,27 +18,22 @@ import (
 const maxDepth = 3
 
 // planner reads the cluster and plans a shutdown. It holds only a reader, so it cannot change an object.
-// A real shutdown and a ShutdownPlan use the same planner.
 type planner struct {
-	reader client.Reader
-
-	// fluxControllers are the Flux controller Deployments that a shutdown scales to 0 first.
+	reader          client.Reader
 	fluxControllers []types.NamespacedName
 }
 
-// planner returns the planner of the reconciler.
 func (r *ShutdownRequestReconciler) planner() planner {
 	return planner{reader: r.Client, fluxControllers: r.FluxControllers}
 }
 
-// plan returns the plan of a shutdown with its findings, as a ShutdownPlan status. It changes nothing.
-// While a ShutdownRequest is active, it plans from the record and the budget of that request.
-// Else it plans from the live state and the default budget.
+// plan returns the plan of a shutdown and its findings as a ShutdownPlan status.
 func (p planner) plan(ctx context.Context, fluxStopTimeout time.Duration, now time.Time) (shutdownv1alpha1.ShutdownPlanStatus, error) {
 	request, err := p.activeRequest(ctx)
 	if err != nil {
 		return shutdownv1alpha1.ShutdownPlanStatus{}, err
 	}
+	// An active request gives the record and the budget. Else the plan uses the live state and the default budget.
 	var spec shutdownv1alpha1.ShutdownRequestSpec
 	var record *shutdownv1alpha1.RecordedState
 	source := "the live state"
@@ -64,7 +59,7 @@ func (p planner) plan(ctx context.Context, fluxStopTimeout time.Duration, now ti
 		keys = append(keys, appKey(app.Namespace, app.Name))
 	}
 
-	// The dry run has no start time, so it plans from the zero time. A deadline is then the time after the start.
+	// A dry run has no start time, so each deadline is an offset from the zero time.
 	var start time.Time
 	fluxLimit, end := shutdownWindow(start, spec, fluxStopTimeout)
 	// The groups start at the Flux limit, as in a real shutdown.
@@ -94,7 +89,7 @@ func (p planner) plan(ctx context.Context, fluxStopTimeout time.Duration, now ti
 	return status, nil
 }
 
-// activeRequest returns the ShutdownRequest when it has a record that a scale-up has not yet restored. Else it returns nil.
+// activeRequest returns the ShutdownRequest when it has a record that is not yet restored, else nil.
 func (p planner) activeRequest(ctx context.Context) (*shutdownv1alpha1.ShutdownRequest, error) {
 	var request shutdownv1alpha1.ShutdownRequest
 	err := p.reader.Get(ctx, client.ObjectKey{Name: shutdownv1alpha1.ShutdownRequestName}, &request)
@@ -110,11 +105,11 @@ func (p planner) activeRequest(ctx context.Context) (*shutdownv1alpha1.ShutdownR
 	return &request, nil
 }
 
-// plannedGroups returns the dependency groups with their tiers. The groups and the applications keep the order of the record.
+// plannedGroups returns the dependency groups with their tiers, in the order of the record.
 func plannedGroups(apps []shutdownv1alpha1.RecordedApplication, gracePeriods map[string]time.Duration, stops stopPlan,
 	tier map[string]int, start time.Time) []shutdownv1alpha1.PlannedGroup {
 	var groups []shutdownv1alpha1.PlannedGroup
-	// position holds the position in groups of each group index.
+	// position maps a group index to its index in groups.
 	position := map[int]int{}
 	for _, app := range apps {
 		key := appKey(app.Namespace, app.Name)

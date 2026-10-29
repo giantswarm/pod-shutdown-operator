@@ -30,7 +30,6 @@ type stopTimes struct {
 
 // stopPlan is the time plan of a shutdown.
 type stopPlan struct {
-	// times holds the stop times of each application by key.
 	times map[string]stopTimes
 
 	// group holds the dependency group of each application by key, as an index.

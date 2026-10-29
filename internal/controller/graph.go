@@ -72,7 +72,6 @@ func allIn(keys []string, set map[string]bool) bool {
 }
 
 // tiers returns the tier of each application by key. Tier 1 has no dependents and stops first.
-// The tier of an application is one more than the highest tier of its dependents, so a cycle shares one tier.
 func tiers(keys []string, deps map[string][]string) map[string]int {
 	reverse := dependents(cyclesAsSteps(deps))
 	tier := map[string]int{}
@@ -81,6 +80,7 @@ func tiers(keys []string, deps map[string][]string) map[string]int {
 		if t, found := tier[key]; found {
 			return t
 		}
+		// One tier below the highest dependent. The members of a cycle have the same dependents, so they share a tier.
 		t := 1
 		for _, dependent := range reverse[key] {
 			t = max(t, tierOf(dependent)+1)

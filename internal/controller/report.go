@@ -12,8 +12,7 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// report returns the plan as text. It lists each application with its group, tier, deadline, and findings,
-// so that a team finds its own application.
+// report returns the plan as text, with the findings under each application.
 func report(status shutdownv1alpha1.ShutdownPlanStatus, source string, spec shutdownv1alpha1.ShutdownRequestSpec, groupsStart time.Duration) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ShutdownPlan computed at %s from %s.\n", status.ComputedAt.UTC().Format(time.RFC3339), source)

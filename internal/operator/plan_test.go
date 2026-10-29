@@ -16,7 +16,7 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
 )
 
-// createPlan creates a ShutdownPlan and waits for its status. It returns the status.
+// createPlan creates a ShutdownPlan and returns its status.
 func createPlan() shutdownv1alpha1.ShutdownPlanStatus {
 	plan := &shutdownv1alpha1.ShutdownPlan{ObjectMeta: metav1.ObjectMeta{GenerateName: "plan-"}}
 	Expect(k8sClient.Create(ctx, plan)).To(Succeed())
@@ -27,7 +27,7 @@ func createPlan() shutdownv1alpha1.ShutdownPlanStatus {
 	return plan.Status
 }
 
-// plannedApplication returns the tier and the plan of an application. It fails when the plan does not hold the application.
+// plannedApplication returns the tier and the plan of an application.
 func plannedApplication(status shutdownv1alpha1.ShutdownPlanStatus, ns, name string) (int32, shutdownv1alpha1.PlannedApplication) {
 	for _, group := range status.Groups {
 		for _, tier := range group.Tiers {
@@ -72,7 +72,6 @@ func duration(d time.Duration) metav1.Duration {
 	return metav1.Duration{Duration: d}
 }
 
-// cleanUpPlans deletes all ShutdownPlans.
 func cleanUpPlans() {
 	Expect(k8sClient.DeleteAllOf(ctx, &shutdownv1alpha1.ShutdownPlan{})).To(Succeed())
 }

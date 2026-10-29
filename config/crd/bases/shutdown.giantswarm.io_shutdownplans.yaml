@@ -131,8 +131,6 @@ spec:
                                     the group fits.
                                   type: string
                                 workloads:
-                                  description: Workloads are the workloads that a
-                                    real shutdown stops.
                                   items:
                                     description: PlannedWorkload is a workload and
                                       the action that a real shutdown does on it.

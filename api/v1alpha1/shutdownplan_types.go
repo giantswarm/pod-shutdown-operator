@@ -66,7 +66,6 @@ type PlannedApplication struct {
 	// +required
 	Deadline metav1.Duration `json:"deadline"`
 
-	// Workloads are the workloads that a real shutdown stops.
 	// +optional
 	// +listType=atomic
 	Workloads []PlannedWorkload `json:"workloads,omitempty"`
