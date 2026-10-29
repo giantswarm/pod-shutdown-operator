@@ -20,7 +20,7 @@ import (
 // It changes no workload. The update uses the resource version of the request,
 // so a stale read fails with a conflict and the record is never written twice.
 func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
-	record, err := r.recordState(ctx)
+	record, err := r.planner().recordState(ctx)
 	if err != nil {
 		return err
 	}
@@ -81,9 +81,9 @@ func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shut
 
 // recordState reads the state of each listed workload.
 // It skips a listed workload that does not exist.
-func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedState, error) {
+func (p planner) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedState, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
-	if err := r.Client.List(ctx, &apps); err != nil {
+	if err := p.reader.List(ctx, &apps); err != nil {
 		return nil, fmt.Errorf("list ManagedApplications: %w", err)
 	}
 
@@ -91,7 +91,7 @@ func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv
 	for _, app := range apps.Items {
 		recorded := shutdownv1alpha1.RecordedApplication{Namespace: app.Namespace, Name: app.Name}
 		for _, ref := range app.Spec.Workloads {
-			w, found, err := r.recordWorkload(ctx, app.Namespace, ref)
+			w, found, err := p.recordWorkload(ctx, app.Namespace, ref)
 			if err != nil {
 				return nil, err
 			}
@@ -106,7 +106,7 @@ func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv
 	})
 
 	// The record comes before the Flux step, so that the scale-up restores the Flux replicas.
-	fluxControllers, err := r.recordFlux(ctx)
+	fluxControllers, err := p.recordFlux(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -115,18 +115,18 @@ func (r *ShutdownRequestReconciler) recordState(ctx context.Context) (*shutdownv
 }
 
 // recordWorkload returns the recorded state of one workload. It returns false when the workload does not exist.
-func (r *ShutdownRequestReconciler) recordWorkload(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
+func (p planner) recordWorkload(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
 	switch ref.Kind {
 	case shutdownv1alpha1.WorkloadKindVirtualMachine:
-		return r.recordVM(ctx, namespace, ref)
+		return p.recordVM(ctx, namespace, ref)
 	case shutdownv1alpha1.WorkloadKindCronJob:
-		return r.recordCronJob(ctx, namespace, ref)
+		return p.recordCronJob(ctx, namespace, ref)
 	}
 	obj, ok := newScalable(ref.Kind)
 	if !ok {
 		return shutdownv1alpha1.RecordedWorkload{}, false, nil
 	}
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, obj)
+	err := p.reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, obj)
 	if apierrors.IsNotFound(err) {
 		return shutdownv1alpha1.RecordedWorkload{}, false, nil
 	}

@@ -100,9 +100,9 @@ func isAbsent(err error) bool {
 
 // recordVM returns the recorded state of a VM: the field that it uses, with its value.
 // It returns false when the VM does not exist.
-func (r *ShutdownRequestReconciler) recordVM(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
+func (p planner) recordVM(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
 	vm := newKubeVirtObject("VirtualMachine", namespace, ref.Name)
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(vm), vm)
+	err := p.reader.Get(ctx, client.ObjectKeyFromObject(vm), vm)
 	if isAbsent(err) {
 		return shutdownv1alpha1.RecordedWorkload{}, false, nil
 	}
@@ -120,7 +120,7 @@ func (r *ShutdownRequestReconciler) recordVM(ctx context.Context, namespace stri
 	strategy = cmp.Or(strategy, runStrategyHalted)
 	w.RunStrategy = &strategy
 	if !strategyTellsState(strategy) {
-		vmi, err := r.runningVMI(ctx, namespace, ref.Name)
+		vmi, err := p.runningVMI(ctx, namespace, ref.Name)
 		if err != nil {
 			return shutdownv1alpha1.RecordedWorkload{}, false, err
 		}
@@ -131,9 +131,9 @@ func (r *ShutdownRequestReconciler) recordVM(ctx context.Context, namespace stri
 }
 
 // runningVMI returns the VMI of a VM. It returns nil when the VMI does not exist or is in a final phase.
-func (r *ShutdownRequestReconciler) runningVMI(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
+func (p planner) runningVMI(ctx context.Context, namespace, name string) (*unstructured.Unstructured, error) {
 	vmi := newKubeVirtObject("VirtualMachineInstance", namespace, name)
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(vmi), vmi)
+	err := p.reader.Get(ctx, client.ObjectKeyFromObject(vmi), vmi)
 	if isAbsent(err) {
 		return nil, nil
 	}
@@ -173,7 +173,7 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		halt = []byte(`{"spec":{"running":false}}`)
 	}
 
-	vmi, err := r.runningVMI(ctx, namespace, name)
+	vmi, err := r.planner().runningVMI(ctx, namespace, name)
 	if err != nil {
 		return false, err
 	}
@@ -208,7 +208,7 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 	// KubeVirt returns a Conflict when the VM does not run. An older KubeVirt also does this after it sets
 	// the VMI grace period to 0. A new read of the VMI tells if the stop is in effect.
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
-		vmi, getErr := r.runningVMI(ctx, namespace, name)
+		vmi, getErr := r.planner().runningVMI(ctx, namespace, name)
 		if getErr == nil && (vmi == nil || forceStopped(vmi)) {
 			return true, nil
 		}
@@ -248,7 +248,7 @@ func (r *ShutdownRequestReconciler) startVM(ctx context.Context, namespace strin
 	if !mustRun(w) {
 		return true, nil
 	}
-	vmi, err := r.runningVMI(ctx, namespace, w.Name)
+	vmi, err := r.planner().runningVMI(ctx, namespace, w.Name)
 	if err != nil {
 		return false, err
 	}
