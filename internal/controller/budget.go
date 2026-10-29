@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
@@ -25,8 +28,35 @@ type stopTimes struct {
 	gracePeriod time.Duration
 }
 
-// planStopTimes returns the stop times of each application by key. It is planning code and changes nothing.
-func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[string]time.Duration, groupsStart, end time.Time) map[string]stopTimes {
+// stopPlan is the time plan of a shutdown.
+type stopPlan struct {
+	times map[string]stopTimes
+
+	// group holds the dependency group of each application by key, as an index.
+	group map[string]int
+
+	// longestChain holds the gracePeriod sum of the longest chain of each group, before the shrink.
+	longestChain map[int]time.Duration
+
+	// available is the time of each group: from the start of the groups to the end.
+	available time.Duration
+}
+
+// shutdownWindow returns the time limit of the Flux step and the end of the budget minus the safety margin.
+func shutdownWindow(startedAt time.Time, spec shutdownv1alpha1.ShutdownRequestSpec, fluxStopTimeout time.Duration) (fluxLimit, end time.Time) {
+	// No validation stops a negative safety margin, which would move the end past the budget.
+	end = startedAt.Add(ptr.Deref(spec.Budget, metav1.Duration{Duration: defaultBudget}).Duration -
+		max(ptr.Deref(spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration, 0))
+	// The Flux step must not use time past the end of the budget.
+	fluxLimit = startedAt.Add(fluxStopTimeout)
+	if fluxLimit.After(end) {
+		fluxLimit = end
+	}
+	return fluxLimit, end
+}
+
+// planStopTimes returns the time plan of a shutdown. It is planning code and changes nothing.
+func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[string]time.Duration, groupsStart, end time.Time) stopPlan {
 	// The applications of a dependency cycle are one parallel step, so the chain counts the cycle one time.
 	steps := cyclesAsSteps(deps)
 
@@ -68,7 +98,7 @@ func planStopTimes(keys []string, deps map[string][]string, gracePeriods map[str
 			gracePeriod: shrink(gracePeriods[key], ratio),
 		}
 	}
-	return times
+	return stopPlan{times: times, group: group, longestChain: longestChain, available: available}
 }
 
 func shrink(d time.Duration, ratio float64) time.Duration {
@@ -107,9 +137,9 @@ func groups(keys []string, deps map[string][]string) map[string]int {
 
 // gracePeriods returns the gracePeriod of each recorded application by key.
 // It reads the ManagedApplications at each call.
-func (r *ShutdownRequestReconciler) gracePeriods(ctx context.Context, recorded []shutdownv1alpha1.RecordedApplication) (map[string]time.Duration, error) {
+func (p planner) gracePeriods(ctx context.Context, recorded []shutdownv1alpha1.RecordedApplication) (map[string]time.Duration, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
-	if err := r.Client.List(ctx, &apps); err != nil {
+	if err := p.reader.List(ctx, &apps); err != nil {
 		return nil, fmt.Errorf("list ManagedApplications: %w", err)
 	}
 
