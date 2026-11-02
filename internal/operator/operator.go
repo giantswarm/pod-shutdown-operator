@@ -108,6 +108,7 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		FluxControllers: c.FluxControllers,
 		FluxStopTimeout: c.FluxStopTimeout,
 		TTL:             c.ShutdownPlanTTL,
+		BootIDFile:      c.BootIDFile,
 		Clock:           c.Clock,
 	}
 	if err := planReconciler.SetupWithManager(mgr); err != nil {

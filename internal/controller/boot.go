@@ -14,9 +14,9 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// readBootID returns the boot ID of the operator node.
-func (r *ShutdownRequestReconciler) readBootID() (string, error) {
-	data, err := os.ReadFile(r.BootIDFile)
+// readBootID returns the boot ID of the operator node from the boot ID file.
+func readBootID(path string) (string, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // The path is an operator setting.
 	if err != nil {
 		return "", fmt.Errorf("read the boot ID file: %w", err)
 	}
@@ -45,7 +45,7 @@ func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[stri
 
 	// After a reboot, the Node object can still show the old boot ID.
 	delete(bootIDs, r.NodeName)
-	bootID, err := r.readBootID()
+	bootID, err := readBootID(r.BootIDFile)
 	// An unreadable file leaves the own entry unknown.
 	if err != nil {
 		log.Error(err, "Failed to read the boot ID, records it as unknown")
@@ -63,7 +63,7 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	}
 
 	log := ctrl.LoggerFrom(ctx)
-	bootID, err := r.readBootID()
+	bootID, err := readBootID(r.BootIDFile)
 	recorded := request.Status.BootIDs[r.NodeName]
 	// An equal boot ID means an operator restart.
 	if err == nil && bootID == recorded {

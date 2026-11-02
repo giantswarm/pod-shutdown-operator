@@ -31,7 +31,27 @@ const (
 	ReasonUnknownDependency = "UnknownDependency"
 	ReasonMissingWorkload   = "MissingWorkload"
 	ReasonGracePeriodShrink = "GracePeriodShrink"
+
+	ReasonPatchRejected                 = "PatchRejected"
+	ReasonPatchFailed                   = "PatchFailed"
+	ReasonUnmanagedWorkload             = "UnmanagedWorkload"
+	ReasonTerminationGracePeriodLonger  = "TerminationGracePeriodLonger"
+	ReasonTerminationGracePeriodShorter = "TerminationGracePeriodShorter"
+	ReasonUnreadableBootID              = "UnreadableBootID"
 )
+
+// PlannedFluxController is a Flux controller Deployment that a real shutdown scales to 0 before the groups.
+type PlannedFluxController struct {
+	// +required
+	Namespace string `json:"namespace"`
+
+	// +required
+	Name string `json:"name"`
+
+	// Replicas is the replica count that the scale-up restores.
+	// +required
+	Replicas int32 `json:"replicas"`
+}
 
 // PlannedWorkload is a workload and the action that a real shutdown does on it.
 type PlannedWorkload struct {
@@ -127,6 +147,11 @@ type ShutdownPlanStatus struct {
 
 	// +optional
 	Result PlanResult `json:"result,omitempty"`
+
+	// FluxControllers are the Flux controllers that a real shutdown scales to 0 before the groups.
+	// +optional
+	// +listType=atomic
+	FluxControllers []PlannedFluxController `json:"fluxControllers,omitempty"`
 
 	// +optional
 	// +listType=atomic

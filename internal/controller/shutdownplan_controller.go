@@ -24,6 +24,9 @@ type ShutdownPlanReconciler struct {
 	// TTL is the age after which the operator deletes a ShutdownPlan.
 	TTL time.Duration
 
+	// BootIDFile is the boot ID file of the operator node. The plan reports a file that the operator cannot read.
+	BootIDFile string
+
 	Clock clock.PassiveClock
 }
 
@@ -46,7 +49,12 @@ func (r *ShutdownPlanReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// The status is a snapshot, so the operator writes it once.
 	if plan.Status.ComputedAt == nil {
-		p := planner{reader: r.Client, fluxControllers: r.FluxControllers}
+		p := planner{
+			reader:          r.Client,
+			fluxControllers: r.FluxControllers,
+			dryRun:          client.NewDryRunClient(r.Client),
+			bootIDFile:      r.BootIDFile,
+		}
 		status, err := p.plan(ctx, r.FluxStopTimeout, r.Clock.Now())
 		if err != nil {
 			return ctrl.Result{}, err
