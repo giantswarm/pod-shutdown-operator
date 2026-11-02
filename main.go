@@ -30,7 +30,7 @@ var setupLog = ctrl.Log.WithName("setup")
 func main() {
 	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName, fluxControllerList string
 	var enableLeaderElection bool
-	var pollInterval, statefulSetScaleUpDelay, staleLimit, fluxStopTimeout, scaleUpTimeout time.Duration
+	var pollInterval, statefulSetScaleUpDelay, staleLimit, fluxStopTimeout, scaleUpTimeout, shutdownPlanTTL time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
 		"The endpoint has no authentication, so keep it inside the cluster. The value 0 disables the metrics endpoint.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address of the probe endpoint.")
@@ -61,6 +61,7 @@ func main() {
 	flag.DurationVar(&scaleUpTimeout, "scale-up-timeout", 30*time.Minute,
 		"The global time limit of the scale-up. At the limit, the operator starts each remaining application with no order, "+
 			"and scales the Flux controllers back.")
+	flag.DurationVar(&shutdownPlanTTL, "shutdown-plan-ttl", time.Hour, "The age after which the operator deletes a ShutdownPlan.")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -85,6 +86,11 @@ func main() {
 	// A limit of 0 or less starts every application at once, with no order.
 	if scaleUpTimeout <= 0 {
 		setupLog.Error(errors.New("the scale-up timeout is not above 0"), "Set --scale-up-timeout to a positive duration")
+		os.Exit(1)
+	}
+	// A time to live of 0 or less deletes each ShutdownPlan before a team can read it.
+	if shutdownPlanTTL <= 0 {
+		setupLog.Error(errors.New("the ShutdownPlan time to live is not above 0"), "Set --shutdown-plan-ttl to a positive duration")
 		os.Exit(1)
 	}
 	fluxControllers, err := parseFluxControllers(fluxControllerList)
@@ -115,6 +121,7 @@ func main() {
 		BootIDFile:              bootIDFile,
 		NodeName:                nodeName,
 		StaleLimit:              staleLimit,
+		ShutdownPlanTTL:         shutdownPlanTTL,
 		Clock:                   clock.RealClock{},
 	})
 	if err != nil {

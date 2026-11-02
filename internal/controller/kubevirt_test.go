@@ -81,7 +81,7 @@ func TestVirtualMachineWithNoKubeVirt(t *testing.T) {
 	ref := shutdownv1alpha1.WorkloadReference{Kind: shutdownv1alpha1.WorkloadKindVirtualMachine, Name: "vm"}
 	recorded := shutdownv1alpha1.RecordedWorkload{Kind: ref.Kind, Name: ref.Name, RunStrategy: ptr.To("Always")}
 
-	if _, found, err := r.recordWorkload(ctx, "ns", ref); found || err != nil {
+	if _, found, err := r.planner().recordWorkload(ctx, "ns", ref); found || err != nil {
 		t.Errorf("recordWorkload: got found %v and error %v, want no workload and no error", found, err)
 	}
 	if stopped, err := r.stopWorkload(ctx, "ns", recorded, true); !stopped || err != nil {

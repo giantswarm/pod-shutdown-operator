@@ -62,7 +62,7 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	pastLimit := time.Since(startedAt.Time) >= r.ScaleUpTimeout
 
 	apps := request.Status.RecordedState.Applications
-	deps, err := r.dependencies(ctx, apps)
+	deps, _, err := r.planner().dependencies(ctx, apps)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

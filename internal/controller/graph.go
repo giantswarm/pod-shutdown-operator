@@ -16,11 +16,11 @@ func appKey(namespace, name string) string {
 
 // dependencies returns the dependencies of each recorded application by key.
 // It reads dependsOn from the ManagedApplications at each call.
-// It ignores a dependsOn name that is not in the record.
-func (r *ShutdownRequestReconciler) dependencies(ctx context.Context, recorded []shutdownv1alpha1.RecordedApplication) (map[string][]string, error) {
+// It ignores a dependsOn name that is not in the record, and returns these names by key as unknown.
+func (p planner) dependencies(ctx context.Context, recorded []shutdownv1alpha1.RecordedApplication) (deps, unknown map[string][]string, err error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
-	if err := r.Client.List(ctx, &apps); err != nil {
-		return nil, fmt.Errorf("list ManagedApplications: %w", err)
+	if err := p.reader.List(ctx, &apps); err != nil {
+		return nil, nil, fmt.Errorf("list ManagedApplications: %w", err)
 	}
 
 	inRecord := map[string]bool{}
@@ -28,7 +28,8 @@ func (r *ShutdownRequestReconciler) dependencies(ctx context.Context, recorded [
 		inRecord[appKey(app.Namespace, app.Name)] = true
 	}
 
-	deps := map[string][]string{}
+	deps = map[string][]string{}
+	unknown = map[string][]string{}
 	for _, app := range apps.Items {
 		key := appKey(app.Namespace, app.Name)
 		if !inRecord[key] {
@@ -41,10 +42,12 @@ func (r *ShutdownRequestReconciler) dependencies(ctx context.Context, recorded [
 			}
 			if inRecord[dep] {
 				deps[key] = append(deps[key], dep)
+			} else {
+				unknown[key] = append(unknown[key], dep)
 			}
 		}
 	}
-	return deps, nil
+	return deps, unknown, nil
 }
 
 // dependents returns the reverse of a dependency map: the applications that depend on each application.
@@ -66,6 +69,29 @@ func allIn(keys []string, set map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// tiers returns the tier of each application by key. Tier 1 has no dependents and stops first.
+func tiers(keys []string, deps map[string][]string) map[string]int {
+	reverse := dependents(cyclesAsSteps(deps))
+	tier := map[string]int{}
+	var tierOf func(string) int
+	tierOf = func(key string) int {
+		if t, found := tier[key]; found {
+			return t
+		}
+		// One tier below the highest dependent. The members of a cycle have the same dependents, so they share a tier.
+		t := 1
+		for _, dependent := range reverse[key] {
+			t = max(t, tierOf(dependent)+1)
+		}
+		tier[key] = t
+		return t
+	}
+	for _, key := range keys {
+		tierOf(key)
+	}
+	return tier
 }
 
 // cyclesAsSteps returns the dependencies with each dependency cycle in one parallel step. The result has no cycle.

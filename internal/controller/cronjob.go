@@ -21,9 +21,9 @@ func suspendPatch(suspend bool) client.Patch {
 
 // recordCronJob returns the recorded state of a CronJob: its suspend value.
 // It returns false when the CronJob does not exist.
-func (r *ShutdownRequestReconciler) recordCronJob(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
+func (p planner) recordCronJob(ctx context.Context, namespace string, ref shutdownv1alpha1.WorkloadReference) (shutdownv1alpha1.RecordedWorkload, bool, error) {
 	var cronJob batchv1.CronJob
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &cronJob)
+	err := p.reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &cronJob)
 	if apierrors.IsNotFound(err) {
 		return shutdownv1alpha1.RecordedWorkload{}, false, nil
 	}

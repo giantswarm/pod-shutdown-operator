@@ -78,11 +78,11 @@ func (s *stopState) forceAt(key string, times stopTimes, now time.Time) time.Tim
 func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) (ctrl.Result, error) {
 	// The workloads come from the record. dependsOn and gracePeriod come from the ManagedApplications.
 	apps := request.Status.RecordedState.Applications
-	deps, err := r.dependencies(ctx, apps)
+	deps, _, err := r.planner().dependencies(ctx, apps)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	gracePeriods, err := r.gracePeriods(ctx, apps)
+	gracePeriods, err := r.planner().gracePeriods(ctx, apps)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -96,14 +96,7 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	if !r.stop.startedAt.Equal(&startedAt) {
 		r.stop = stopState{startedAt: startedAt}
 	}
-	// No validation stops a negative safety margin, which would move the end past the budget.
-	end := startedAt.Add(ptr.Deref(request.Spec.Budget, metav1.Duration{Duration: defaultBudget}).Duration -
-		max(ptr.Deref(request.Spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration, 0))
-	// The Flux step must not use time past the end of the budget.
-	fluxLimit := startedAt.Add(r.FluxStopTimeout)
-	if fluxLimit.After(end) {
-		fluxLimit = end
-	}
+	fluxLimit, end := shutdownWindow(startedAt.Time, request.Spec, r.FluxStopTimeout)
 	// Flux must not revert a scale-down, so no application changes before the Flux step ends.
 	fluxControllers := request.Status.RecordedState.FluxControllers
 	if !r.stop.fluxStopped {
@@ -117,7 +110,7 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	if len(fluxControllers) > 0 {
 		groupsStart = fluxLimit
 	}
-	times := planStopTimes(keys, deps, gracePeriods, groupsStart, end)
+	times := planStopTimes(keys, deps, gracePeriods, groupsStart, end).times
 	// An application stops after its dependents, and a cycle stops as one step.
 	reverse := dependents(cyclesAsSteps(deps))
 	now := time.Now()

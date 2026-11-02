@@ -11,11 +11,11 @@ import (
 )
 
 // recordFlux returns the replicas of each configured Flux controller that exists.
-func (r *ShutdownRequestReconciler) recordFlux(ctx context.Context) ([]shutdownv1alpha1.RecordedFluxController, error) {
+func (p planner) recordFlux(ctx context.Context) ([]shutdownv1alpha1.RecordedFluxController, error) {
 	var record []shutdownv1alpha1.RecordedFluxController
-	for _, c := range r.FluxControllers {
+	for _, c := range p.fluxControllers {
 		ref := shutdownv1alpha1.WorkloadReference{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: c.Name}
-		w, found, err := r.recordWorkload(ctx, c.Namespace, ref)
+		w, found, err := p.recordWorkload(ctx, c.Namespace, ref)
 		if err != nil {
 			return nil, err
 		}

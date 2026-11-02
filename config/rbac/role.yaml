@@ -89,6 +89,24 @@ rules:
 - apiGroups:
   - shutdown.giantswarm.io
   resources:
+  - shutdownplans
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - shutdown.giantswarm.io
+  resources:
+  - shutdownplans/status
+  - shutdownrequests/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - shutdown.giantswarm.io
+  resources:
   - shutdownrequests
   verbs:
   - create
@@ -97,14 +115,6 @@ rules:
   - list
   - patch
   - watch
-- apiGroups:
-  - shutdown.giantswarm.io
-  resources:
-  - shutdownrequests/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - subresources.kubevirt.io
   resources:

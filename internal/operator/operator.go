@@ -56,7 +56,10 @@ type Config struct {
 	// StaleLimit is the age after which a request with no phase is stale.
 	StaleLimit time.Duration
 
-	// Clock gives the age of a request, so that a test can set it.
+	// ShutdownPlanTTL is the age after which the operator deletes a ShutdownPlan.
+	ShutdownPlanTTL time.Duration
+
+	// Clock gives the age of a request and of a ShutdownPlan, so that a test can set it.
 	Clock clock.PassiveClock
 
 	// VirtualMachineActions calls the stop and start subresources of KubeVirt. Nil calls the KubeVirt API.
@@ -98,6 +101,17 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownRequest controller: %w", err)
+	}
+
+	planReconciler := &controller.ShutdownPlanReconciler{
+		Client:          client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+		FluxControllers: c.FluxControllers,
+		FluxStopTimeout: c.FluxStopTimeout,
+		TTL:             c.ShutdownPlanTTL,
+		Clock:           c.Clock,
+	}
+	if err := planReconciler.SetupWithManager(mgr); err != nil {
+		return nil, fmt.Errorf("set up ShutdownPlan controller: %w", err)
 	}
 
 	if c.APIBindAddress != "" {

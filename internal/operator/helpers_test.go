@@ -56,6 +56,9 @@ func startOperator(c operator.Config) (func(), ctrl.Manager) {
 	if c.StaleLimit == 0 {
 		c.StaleLimit = 5 * time.Minute
 	}
+	if c.ShutdownPlanTTL == 0 {
+		c.ShutdownPlanTTL = time.Hour
+	}
 	if c.Clock == nil {
 		c.Clock = clock.RealClock{}
 	}
