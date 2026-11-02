@@ -83,6 +83,7 @@ var _ = Describe("A ShutdownPlan", func() {
 	)
 
 	BeforeEach(func() {
+		deleteAllWorkloads()
 		ns = newNamespace()
 	})
 
@@ -94,8 +95,9 @@ var _ = Describe("A ShutdownPlan", func() {
 
 	It("writes the groups with their tiers, applications, actions, and deadlines from the configured gracePeriod values", func() {
 		stop, _ = startOperator(operator.Config{})
-		createDeployment(ns, "web", 2)
-		createStatefulSet(ns, "db", 1)
+		// The terminationGracePeriodSeconds values match the gracePeriod values, so the plan has no finding.
+		setTerminationGracePeriod(createDeployment(ns, "web", 2), 10)
+		setTerminationGracePeriod(createStatefulSet(ns, "db", 1), 20)
 		createCronJob(ns, "report", false)
 		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
 		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindStatefulSet, "db"))
@@ -140,7 +142,7 @@ var _ = Describe("A ShutdownPlan", func() {
 		Expect(status.Report).To(ContainSubstring("deadline 9m10s"))
 	})
 
-	It("leaves every other object unchanged, and starts the groups after the time limit of the Flux step", func() {
+	It("sends the patches as a server-side dry run, leaves every other object unchanged, and lists the Flux controllers", func() {
 		fluxNS := newNamespace()
 		DeferCleanup(cleanUp, fluxNS)
 		kustomize := createDeployment(fluxNS, "kustomize-controller", 1)
@@ -149,14 +151,18 @@ var _ = Describe("A ShutdownPlan", func() {
 			FluxStopTimeout: time.Minute,
 		})
 		web := createDeployment(ns, "web", 2)
+		db := createStatefulSet(ns, "db", 1)
 		cronJob := createCronJob(ns, "report", false)
+		createVM(ns, "vm", map[string]any{"running": true})
 		createApplication(ns, "shop",
 			workload(shutdownv1alpha1.WorkloadKindDeployment, "web"),
+			workload(shutdownv1alpha1.WorkloadKindStatefulSet, "db"),
 			workload(shutdownv1alpha1.WorkloadKindCronJob, "report"),
+			workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "vm"),
 		)
 		app := &shutdownv1alpha1.ManagedApplication{}
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "shop"}, app)).To(Succeed())
-		objects := []client.Object{kustomize, web, cronJob, app}
+		objects := []client.Object{kustomize, web, db, cronJob, newKubeVirtObject("VirtualMachine", ns, "vm"), app}
 		versions := map[client.Object]string{}
 		for _, obj := range objects {
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
@@ -165,6 +171,12 @@ var _ = Describe("A ShutdownPlan", func() {
 
 		status := createPlan()
 
+		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultOK))
+		Expect(status.FluxControllers).To(ConsistOf(shutdownv1alpha1.PlannedFluxController{
+			Namespace: fluxNS, Name: "kustomize-controller", Replicas: 1,
+		}))
+		Expect(status.Report).To(ContainSubstring(fluxNS + "/kustomize-controller"))
+		// The groups start after the time limit of the Flux step.
 		Expect(groupOf(status, ns, "shop").Available).To(Equal(duration(8*time.Minute + 30*time.Second)))
 		Consistently(func() map[client.Object]string {
 			current := map[client.Object]string{}
@@ -229,6 +241,7 @@ var _ = Describe("The findings of a ShutdownPlan", func() {
 	)
 
 	BeforeEach(func() {
+		deleteAllWorkloads()
 		ns = newNamespace()
 		stop, _ = startOperator(operator.Config{})
 	})

@@ -3,6 +3,7 @@
 package operator_test
 
 import (
+	"slices"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -29,7 +30,7 @@ var _ = Describe("The record at the start of a shutdown", func() {
 		cleanUp(ns1, ns2)
 	})
 
-	It("records the replicas of each listed workload and sets ShuttingDown", func() {
+	It("records the replicas of each listed workload and the unmanaged workloads, and sets ShuttingDown", func() {
 		createDeployment(ns1, "web", 3)
 		createStatefulSet(ns1, "db", 2)
 		createDeployment(ns1, "unlisted", 4)
@@ -64,6 +65,10 @@ var _ = Describe("The record at the start of a shutdown", func() {
 				{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: "api", Replicas: ptr.To[int32](1)},
 			}},
 		))
+		// Other tests leave workloads in their namespaces.
+		Expect(slices.DeleteFunc(status.Unmanaged, func(w shutdownv1alpha1.UnmanagedWorkload) bool {
+			return w.Namespace != ns1
+		})).To(ConsistOf(shutdownv1alpha1.UnmanagedWorkload{Namespace: ns1, Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: "unlisted"}))
 	})
 
 	It("writes nothing for a request with the action Cancel and no phase", func() {

@@ -13,6 +13,7 @@ import (
 )
 
 // report returns the plan as text, with the findings under each application.
+// The findings that are about no application come before the groups.
 func report(status shutdownv1alpha1.ShutdownPlanStatus, source string, spec shutdownv1alpha1.ShutdownRequestSpec, groupsStart time.Duration) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ShutdownPlan computed at %s from %s.\n", status.ComputedAt.UTC().Format(time.RFC3339), source)
@@ -22,6 +23,24 @@ func report(status shutdownv1alpha1.ShutdownPlanStatus, source string, spec shut
 		ptr.Deref(spec.SafetyMargin, metav1.Duration{Duration: defaultSafetyMargin}).Duration,
 		groupsStart)
 	fmt.Fprintf(&b, "Result: %s\n", status.Result)
+
+	if len(status.FluxControllers) > 0 {
+		b.WriteString("\nFlux controllers, scaled to 0 before the groups:\n")
+		for _, c := range status.FluxControllers {
+			fmt.Fprintf(&b, "  %s: ScaleToZero, the scale-up restores %d replicas\n", appKey(c.Namespace, c.Name), c.Replicas)
+		}
+	}
+	clusterHeader := false
+	for _, f := range status.Findings {
+		if len(f.Applications) > 0 {
+			continue
+		}
+		if !clusterHeader {
+			b.WriteString("\nCluster findings:\n")
+			clusterHeader = true
+		}
+		fmt.Fprintf(&b, "  %s %s: %s Fallback: %s\n", f.Severity, f.Reason, f.Message, f.Fallback)
+	}
 
 	for i, group := range status.Groups {
 		fmt.Fprintf(&b, "\nGroup %d: longest chain %s, available %s\n", i+1, group.LongestChain.Duration, group.Available.Duration)

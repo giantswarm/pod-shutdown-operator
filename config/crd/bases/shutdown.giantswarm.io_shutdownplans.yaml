@@ -89,6 +89,29 @@ spec:
                   type: object
                 type: array
                 x-kubernetes-list-type: atomic
+              fluxControllers:
+                description: FluxControllers are the Flux controllers that a real
+                  shutdown scales to 0 before the groups.
+                items:
+                  description: PlannedFluxController is a Flux controller Deployment
+                    that a real shutdown scales to 0 before the groups.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    replicas:
+                      description: Replicas is the replica count that the scale-up
+                        restores.
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  - namespace
+                  - replicas
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
               groups:
                 items:
                   description: 'PlannedGroup is a dependency group: a set of applications

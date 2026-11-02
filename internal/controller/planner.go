@@ -17,10 +17,15 @@ import (
 // maxDepth is the expected maximum depth of a dependency group, in tiers.
 const maxDepth = 3
 
-// planner reads the cluster and plans a shutdown. It holds only a reader, so it cannot change an object.
+// planner reads the cluster and plans a shutdown. It cannot change an object: it holds a reader,
+// and a writer that sends each write as a server-side dry run.
 type planner struct {
 	reader          client.Reader
 	fluxControllers []types.NamespacedName
+
+	// dryRun and bootIDFile are for the cluster checks of a ShutdownPlan.
+	dryRun     client.Writer
+	bootIDFile string
 }
 
 func (r *ShutdownRequestReconciler) planner() planner {
@@ -78,12 +83,18 @@ func (p planner) plan(ctx context.Context, fluxStopTimeout time.Duration, now ti
 		return shutdownv1alpha1.ShutdownPlanStatus{}, err
 	}
 	findings = append(findings, missing...)
+	cluster, err := p.clusterFindings(ctx, record, gracePeriods)
+	if err != nil {
+		return shutdownv1alpha1.ShutdownPlanStatus{}, err
+	}
+	findings = append(findings, cluster...)
 
 	status := shutdownv1alpha1.ShutdownPlanStatus{
-		ComputedAt: &metav1.Time{Time: now},
-		Result:     result(findings),
-		Groups:     groups,
-		Findings:   findings,
+		ComputedAt:      &metav1.Time{Time: now},
+		Result:          result(findings),
+		FluxControllers: plannedFlux(record.FluxControllers),
+		Groups:          groups,
+		Findings:        findings,
 	}
 	status.Report = report(status, source, spec, groupsStart.Sub(start))
 	return status, nil
@@ -141,6 +152,15 @@ func plannedGroups(apps []shutdownv1alpha1.RecordedApplication, gracePeriods map
 		t.Applications = append(t.Applications, planned)
 	}
 	return groups
+}
+
+// plannedFlux returns the Flux controllers of the record.
+func plannedFlux(controllers []shutdownv1alpha1.RecordedFluxController) []shutdownv1alpha1.PlannedFluxController {
+	var planned []shutdownv1alpha1.PlannedFluxController
+	for _, c := range controllers {
+		planned = append(planned, shutdownv1alpha1.PlannedFluxController(c))
+	}
+	return planned
 }
 
 // actionOf returns the action of a real shutdown on a workload kind.

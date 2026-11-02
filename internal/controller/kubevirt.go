@@ -162,15 +162,12 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return false, fmt.Errorf("get %s %s/%s: %w", kind, namespace, name, err)
 	}
 
-	// KubeVirt rejects a VM with both fields, so the patch sets the field that the VM uses now.
 	strategy, _, _ := unstructured.NestedString(vm.Object, "spec", "runStrategy")
 	strategy = cmp.Or(strategy, runStrategyHalted)
 	halted := strategy == runStrategyHalted
-	halt := []byte(`{"spec":{"runStrategy":"Halted"}}`)
 	running, usesRunning, _ := unstructured.NestedBool(vm.Object, "spec", "running")
 	if usesRunning {
 		halted = !running
-		halt = []byte(`{"spec":{"running":false}}`)
 	}
 
 	vmi, err := r.planner().runningVMI(ctx, namespace, name)
@@ -182,7 +179,7 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return true, nil
 	}
 	if !halted {
-		err := retryOnce(func() error { return r.Client.Patch(ctx, vm, client.RawPatch(types.MergePatchType, halt)) })
+		err := retryOnce(func() error { return r.Client.Patch(ctx, vm, haltPatch(usesRunning)) })
 		if isAbsent(err) {
 			return true, nil
 		}
@@ -221,6 +218,15 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 	}
 	ctrl.LoggerFrom(ctx).Info("Forced stop: stopped a VM with a grace period of 0", "vm", appKey(namespace, name))
 	return false, nil
+}
+
+// haltPatch returns the merge patch that halts a VM.
+// KubeVirt rejects a VM with both fields, so the patch sets the field that the VM uses now.
+func haltPatch(usesRunning bool) client.Patch {
+	if usesRunning {
+		return client.RawPatch(types.MergePatchType, []byte(`{"spec":{"running":false}}`))
+	}
+	return client.RawPatch(types.MergePatchType, []byte(`{"spec":{"runStrategy":"Halted"}}`))
 }
 
 // forceStopped returns true when the VMI has a grace period of 0.

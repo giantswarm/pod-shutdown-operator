@@ -16,13 +16,19 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// startShutdown writes the record, the boot IDs, the start time, and the phase ShuttingDown in one status update.
+// startShutdown writes the record, the unmanaged workloads, the boot IDs, the start time, and the phase ShuttingDown
+// in one status update.
 // It changes no workload. The update uses the resource version of the request,
 // so a stale read fails with a conflict and the record is never written twice.
 func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
 	record, err := r.planner().recordState(ctx)
 	if err != nil {
 		return err
+	}
+	// The unmanaged workloads are information only, so a failed read must not block the shutdown.
+	unmanaged, err := r.planner().unmanaged(ctx)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to find the unmanaged workloads, records none")
 	}
 
 	now := metav1.Now()
@@ -31,6 +37,7 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     record,
 		BootIDs:           r.currentBootIDs(ctx),
+		Unmanaged:         unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             int32(len(record.Applications)), //nolint:gosec // The number of applications is small.
 	}

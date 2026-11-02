@@ -2,6 +2,7 @@ package controller
 
 import (
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -29,6 +30,17 @@ func replicasAndSelector(obj client.Object) (*int32, *metav1.LabelSelector) {
 		return o.Spec.Replicas, o.Spec.Selector
 	}
 	return nil, nil
+}
+
+// podTemplate returns spec.template of an object from newScalable.
+func podTemplate(obj client.Object) corev1.PodTemplateSpec {
+	switch o := obj.(type) {
+	case *appsv1.Deployment:
+		return o.Spec.Template
+	case *appsv1.StatefulSet:
+		return o.Spec.Template
+	}
+	return corev1.PodTemplateSpec{}
 }
 
 // workloadReady returns true when the controller of an object from newScalable has seen its current
