@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: detect a power cycle at operator start
 - feat: stop the Flux controllers first and restore them last
 - feat: add the ShutdownPlan dry run
+- feat: add the cluster checks to the ShutdownPlan dry run
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
