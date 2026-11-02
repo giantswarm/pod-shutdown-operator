@@ -33,6 +33,9 @@ const (
 	apiToken          = "e2e-token"
 	fluxNamespace     = "flux-system"
 
+	// kubeContext is the context of the kind cluster that E2E_CLUSTER in Makefile.custom.mk names.
+	kubeContext = "kind-pod-shutdown-operator-e2e"
+
 	// statefulSetScaleUpDelay is equal to operator.statefulSetScaleUpDelay in values.yaml.
 	statefulSetScaleUpDelay = 20 * time.Second
 )
@@ -56,8 +59,9 @@ func TestE2E(t *testing.T) {
 var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.Background())
 
-	cfg, err := config.GetConfig()
-	Expect(err).NotTo(HaveOccurred())
+	// The suite deletes namespaces, so it uses the kind context and never the current context of the kubeconfig.
+	cfg, err := config.GetConfigWithContext(kubeContext)
+	Expect(err).NotTo(HaveOccurred(), "the kubeconfig must have the context %s, run make test-e2e", kubeContext)
 	k8sClient, err = client.New(cfg, client.Options{Scheme: operator.NewScheme()})
 	Expect(err).NotTo(HaveOccurred())
 

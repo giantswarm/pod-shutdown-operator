@@ -74,8 +74,8 @@ func createNamespace(name string) string {
 func deleteNamespace(name string) {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, ns))).To(Succeed())
-	Eventually(func() error {
-		Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace(name), client.GracePeriodSeconds(0))).To(Succeed())
+	Eventually(func(g Gomega) error {
+		g.Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace(name), client.GracePeriodSeconds(0))).To(Succeed())
 		return k8sClient.Get(ctx, client.ObjectKeyFromObject(ns), ns)
 	}).Should(Satisfy(apierrors.IsNotFound))
 }
