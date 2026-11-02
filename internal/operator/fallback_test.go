@@ -17,9 +17,9 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
 )
 
-// createGuardedDeployment creates a Deployment with 3 replicas and a policy that makes the API server
+// createGuardedDeployment creates a Deployment with the replicas and a policy that makes the API server
 // reject a scale to 0 of it. It waits until the API server applies the policy.
-func createGuardedDeployment(ns, deployment string) client.Object {
+func createGuardedDeployment(ns, deployment string, replicas int32) client.Object {
 	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-scale-to-zero-"},
 		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
@@ -58,7 +58,7 @@ func createGuardedDeployment(ns, deployment string) client.Object {
 	Expect(k8sClient.Create(ctx, binding)).To(Succeed())
 	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, binding)).To(Succeed()) })
 
-	d := createDeployment(ns, deployment, 3)
+	d := createDeployment(ns, deployment, replicas)
 	scaleToZero := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))
 	Eventually(func() error {
 		return k8sClient.Patch(ctx, d, scaleToZero, client.DryRunAll)
@@ -213,7 +213,7 @@ var _ = Describe("The fallback rules in a real shutdown", func() {
 	})
 
 	It("reports an application with a rejected patch in status.failed and goes on", func() {
-		guarded := createGuardedDeployment(ns, "guarded")
+		guarded := createGuardedDeployment(ns, "guarded", 3)
 		db := createStatefulSet(ns, "db", 1)
 		other := createDeployment(ns, "other", 1)
 		createApplication(ns, "guarded", workload(shutdownv1alpha1.WorkloadKindDeployment, "guarded"))

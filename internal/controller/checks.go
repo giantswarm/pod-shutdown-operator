@@ -3,13 +3,16 @@ package controller
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -41,45 +44,58 @@ func (p planner) clusterFindings(ctx context.Context, record *shutdownv1alpha1.R
 }
 
 // patchFindings sends each patch of a real shutdown as a server-side dry run.
-// It returns an Error for each patch that the API server rejects.
+// It returns an Error for each patch that the API server rejects or fails with a server error.
 func (p planner) patchFindings(ctx context.Context, record *shutdownv1alpha1.RecordedState) ([]shutdownv1alpha1.Finding, error) {
 	var findings []shutdownv1alpha1.Finding
-	// check sends one patch. what names the patch in the message of the finding.
-	check := func(obj client.Object, patch client.Patch, what string, finding shutdownv1alpha1.Finding) error {
-		err := p.dryRun.Patch(ctx, obj, patch)
+	// check sends the patch that stops one workload. what names the patch in the message of the finding.
+	// failedFallback is the fallback after a server error.
+	check := func(namespace string, w shutdownv1alpha1.RecordedWorkload, what string, finding shutdownv1alpha1.Finding,
+		failedFallback string) error {
+		obj, patch, err := p.stopPatch(ctx, namespace, w)
+		if err != nil || patch == nil {
+			return err
+		}
+		// A real shutdown also sends a patch again after an error.
+		err = retryOnce(func() error { return p.dryRun.Patch(ctx, obj, patch) })
 		// A real shutdown counts a workload that no longer exists as stopped.
 		if err == nil || isAbsent(err) {
 			return nil
 		}
-		// A later plan can avoid the other errors, so they do not become a finding.
-		if !isRejected(err) {
+		finding.Severity = shutdownv1alpha1.SeverityError
+		switch {
+		case isRejected(err):
+			finding.Reason = shutdownv1alpha1.ReasonPatchRejected
+			finding.Message = fmt.Sprintf("The API server rejected the dry run of %s: %v.", what, err)
+		case isServerError(err):
+			// For example, an admission webhook that fails. It can fail at each later plan too.
+			finding.Reason = shutdownv1alpha1.ReasonPatchFailed
+			finding.Message = fmt.Sprintf("The dry run of %s failed with a server error: %v.", what, err)
+			finding.Fallback = failedFallback
+		default:
+			// A later plan can avoid the other errors: no response, a timeout, a conflict, too many requests.
 			return fmt.Errorf("send the dry run of %s: %w", what, err)
 		}
-		finding.Severity = shutdownv1alpha1.SeverityError
-		finding.Reason = shutdownv1alpha1.ReasonPatchRejected
-		finding.Message = fmt.Sprintf("The API server rejected the dry run of %s: %v.", what, err)
 		findings = append(findings, finding)
 		return nil
 	}
 
 	for _, c := range record.FluxControllers {
-		deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: c.Namespace, Name: c.Name}}
-		err := check(deployment, scaleToZero, "the scale to 0 of the Flux controller "+appKey(c.Namespace, c.Name),
-			shutdownv1alpha1.Finding{
-				Fallback: "Try again at each poll up to the time limit of the Flux step. Then stop the applications while Flux runs.",
-			})
+		fallback := "Try again at each poll up to the time limit of the Flux step. Then stop the applications while Flux runs."
+		err := check(c.Namespace, shutdownv1alpha1.RecordedWorkload{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: c.Name},
+			"the scale to 0 of the Flux controller "+appKey(c.Namespace, c.Name),
+			shutdownv1alpha1.Finding{Fallback: fallback}, fallback)
 		if err != nil {
 			return nil, err
 		}
 	}
 	for _, app := range record.Applications {
 		for _, w := range app.Workloads {
-			obj, patch := shutdownPatch(app.Namespace, w)
-			err := check(obj, patch, fmt.Sprintf("the %s patch of %s %s", actionOf(w.Kind), w.Kind, w.Name),
+			err := check(app.Namespace, w, fmt.Sprintf("the %s patch of %s %s", actionOf(w.Kind), w.Kind, w.Name),
 				shutdownv1alpha1.Finding{
 					Applications: []string{appKey(app.Namespace, app.Name)},
 					Fallback:     "Add the application to status.failed. Then continue with its dependencies.",
-				})
+				},
+				"Try again at each poll up to the forced stop. Then add the application to status.failed, and continue with its dependencies.")
 			if err != nil {
 				return nil, err
 			}
@@ -88,19 +104,63 @@ func (p planner) patchFindings(ctx context.Context, record *shutdownv1alpha1.Rec
 	return findings, nil
 }
 
-// shutdownPatch returns the object and the patch that a real shutdown sends to stop a workload.
-func shutdownPatch(namespace string, w shutdownv1alpha1.RecordedWorkload) (client.Object, client.Patch) {
-	objectMeta := metav1.ObjectMeta{Namespace: namespace, Name: w.Name}
+// isServerError returns true when the API server answered with a server error (5xx).
+func isServerError(err error) bool {
+	var status apierrors.APIStatus
+	return errors.As(err, &status) && status.Status().Code >= http.StatusInternalServerError
+}
+
+// stopPatch returns the object and the patch that a real shutdown sends to stop a workload. As a real shutdown,
+// it reads the live object. It returns a nil patch when a real shutdown sends no patch: the workload does not
+// exist, or it is already stopped.
+func (p planner) stopPatch(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (client.Object, client.Patch, error) {
 	switch w.Kind {
 	case shutdownv1alpha1.WorkloadKindVirtualMachine:
-		// The record holds the field that the VM uses.
-		return newKubeVirtObject(string(w.Kind), namespace, w.Name), haltPatch(w.Running != nil)
+		return p.vmStopPatch(ctx, namespace, w.Name)
 	case shutdownv1alpha1.WorkloadKindCronJob:
-		return &batchv1.CronJob{ObjectMeta: objectMeta}, suspendPatch(true)
-	case shutdownv1alpha1.WorkloadKindStatefulSet:
-		return &appsv1.StatefulSet{ObjectMeta: objectMeta}, scaleToZero
+		// A real shutdown suspends a CronJob also when it is already suspended.
+		return &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: w.Name}}, suspendPatch(true), nil
 	}
-	return &appsv1.Deployment{ObjectMeta: objectMeta}, scaleToZero
+	obj, ok := newScalable(w.Kind)
+	if !ok {
+		return nil, nil, nil
+	}
+	err := p.reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: w.Name}, obj)
+	if isAbsent(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+	}
+	if replicas, _ := replicasAndSelector(obj); ptr.Deref(replicas, 1) == 0 {
+		return nil, nil, nil
+	}
+	return obj, scaleToZero, nil
+}
+
+// vmStopPatch returns the VM and the patch that a real shutdown sends to halt it, with the rules of stopVM.
+func (p planner) vmStopPatch(ctx context.Context, namespace, name string) (client.Object, client.Patch, error) {
+	kind := shutdownv1alpha1.WorkloadKindVirtualMachine
+	vm := newKubeVirtObject(string(kind), namespace, name)
+	err := p.reader.Get(ctx, client.ObjectKeyFromObject(vm), vm)
+	if isAbsent(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get %s %s/%s: %w", kind, namespace, name, err)
+	}
+	strategy, halted, usesRunning := haltState(vm)
+	if halted {
+		return nil, nil, nil
+	}
+	// A real shutdown keeps the field of a VM that does not run, when the run strategy does not tell this.
+	if !usesRunning && !strategyTellsState(strategy) {
+		vmi, err := p.runningVMI(ctx, namespace, name)
+		if err != nil || vmi == nil {
+			return nil, nil, err
+		}
+	}
+	return vm, haltPatch(usesRunning), nil
 }
 
 // terminationFindings returns a Warning for each workload whose terminationGracePeriodSeconds is longer
@@ -112,6 +172,10 @@ func (p planner) terminationFindings(ctx context.Context, apps []shutdownv1alpha
 		key := appKey(app.Namespace, app.Name)
 		gracePeriod := gracePeriods[key]
 		for _, w := range app.Workloads {
+			// A real shutdown stops no pod of a workload that did not run at the start.
+			if !recordedRunning(w) {
+				continue
+			}
 			termination, found, err := p.terminationGracePeriod(ctx, app.Namespace, w)
 			if err != nil {
 				return nil, err
@@ -178,8 +242,21 @@ func (p planner) terminationGracePeriod(ctx context.Context, namespace string, w
 	return time.Duration(seconds) * time.Second, true, nil
 }
 
+// recordedRunning returns true when the record tells that a workload runs: a Deployment or a StatefulSet with
+// replicas above 0, or a VM that must run. A CronJob counts as running.
+func recordedRunning(w shutdownv1alpha1.RecordedWorkload) bool {
+	switch w.Kind {
+	case shutdownv1alpha1.WorkloadKindVirtualMachine:
+		return mustRun(w)
+	case shutdownv1alpha1.WorkloadKindDeployment, shutdownv1alpha1.WorkloadKindStatefulSet:
+		return ptr.Deref(w.Replicas, 1) != 0
+	}
+	return true
+}
+
 // unmanaged returns the Deployments and StatefulSets with replicas above 0, and the VMs that run, that no
 // ManagedApplication lists. It skips the Flux controllers, because a real shutdown scales them.
+// The field that a VM uses tells if it runs. Only when the run strategy does not tell this, the VMI tells it.
 func (p planner) unmanaged(ctx context.Context) ([]shutdownv1alpha1.UnmanagedWorkload, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
 	if err := p.reader.List(ctx, &apps); err != nil {
@@ -230,12 +307,18 @@ func (p planner) unmanaged(ctx context.Context) ([]shutdownv1alpha1.UnmanagedWor
 		if listed[shutdownv1alpha1.UnmanagedWorkload{Namespace: vm.GetNamespace(), Kind: kind, Name: vm.GetName()}] {
 			continue
 		}
-		vmi, err := p.runningVMI(ctx, vm.GetNamespace(), vm.GetName())
-		if err != nil {
-			return nil, err
+		strategy, halted, usesRunning := haltState(&vm)
+		runs := !halted
+		// The read of the VMI is slow, because the client does not cache it. Thus only these VMs get it.
+		if !usesRunning && !strategyTellsState(strategy) {
+			vmi, err := p.runningVMI(ctx, vm.GetNamespace(), vm.GetName())
+			if err != nil {
+				return nil, err
+			}
+			// A VMI in deletion stops.
+			runs = vmi != nil && vmi.GetDeletionTimestamp() == nil
 		}
-		// A VMI in deletion stops.
-		add(vm.GetNamespace(), kind, vm.GetName(), vmi != nil && vmi.GetDeletionTimestamp() == nil)
+		add(vm.GetNamespace(), kind, vm.GetName(), runs)
 	}
 
 	slices.SortFunc(unmanaged, func(a, b shutdownv1alpha1.UnmanagedWorkload) int {

@@ -33,6 +33,7 @@ const (
 	ReasonGracePeriodShrink = "GracePeriodShrink"
 
 	ReasonPatchRejected                 = "PatchRejected"
+	ReasonPatchFailed                   = "PatchFailed"
 	ReasonUnmanagedWorkload             = "UnmanagedWorkload"
 	ReasonTerminationGracePeriodLonger  = "TerminationGracePeriodLonger"
 	ReasonTerminationGracePeriodShorter = "TerminationGracePeriodShorter"

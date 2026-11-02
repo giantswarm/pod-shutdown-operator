@@ -162,14 +162,7 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return false, fmt.Errorf("get %s %s/%s: %w", kind, namespace, name, err)
 	}
 
-	strategy, _, _ := unstructured.NestedString(vm.Object, "spec", "runStrategy")
-	strategy = cmp.Or(strategy, runStrategyHalted)
-	halted := strategy == runStrategyHalted
-	running, usesRunning, _ := unstructured.NestedBool(vm.Object, "spec", "running")
-	if usesRunning {
-		halted = !running
-	}
-
+	strategy, halted, usesRunning := haltState(vm)
 	vmi, err := r.planner().runningVMI(ctx, namespace, name)
 	if err != nil {
 		return false, err
@@ -218,6 +211,18 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 	}
 	ctrl.LoggerFrom(ctx).Info("Forced stop: stopped a VM with a grace period of 0", "vm", appKey(namespace, name))
 	return false, nil
+}
+
+// haltState returns the run strategy of a VM, true when the field that the VM uses halts it,
+// and true when the VM uses the running field.
+func haltState(vm *unstructured.Unstructured) (strategy string, halted, usesRunning bool) {
+	// KubeVirt treats a VM with neither field as Halted.
+	strategy, _, _ = unstructured.NestedString(vm.Object, "spec", "runStrategy")
+	strategy = cmp.Or(strategy, runStrategyHalted)
+	if running, found, _ := unstructured.NestedBool(vm.Object, "spec", "running"); found {
+		return strategy, !running, true
+	}
+	return strategy, strategy == runStrategyHalted, false
 }
 
 // haltPatch returns the merge patch that halts a VM.

@@ -16,6 +16,9 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
+// unmanagedTimeout is the time limit of the read of the unmanaged workloads at the start of a shutdown.
+const unmanagedTimeout = 5 * time.Second
+
 // startShutdown writes the record, the unmanaged workloads, the boot IDs, the start time, and the phase ShuttingDown
 // in one status update.
 // It changes no workload. The update uses the resource version of the request,
@@ -25,8 +28,10 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	if err != nil {
 		return err
 	}
-	// The unmanaged workloads are information only, so a failed read must not block the shutdown.
-	unmanaged, err := r.planner().unmanaged(ctx)
+	// The unmanaged workloads are information only, so a failed or slow read must not block the shutdown.
+	unmanagedCtx, cancel := context.WithTimeout(ctx, unmanagedTimeout)
+	unmanaged, err := r.planner().unmanaged(unmanagedCtx)
+	cancel()
 	if err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "Failed to find the unmanaged workloads, records none")
 	}

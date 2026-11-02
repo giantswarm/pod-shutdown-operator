@@ -65,12 +65,12 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 	It("reports a patch that the API server rejects in the dry run as an Error, for an application and for a Flux controller", func() {
 		fluxNS := newNamespace()
 		DeferCleanup(cleanUp, fluxNS)
-		kustomize := createGuardedDeployment(fluxNS, "kustomize-controller")
+		kustomize := createGuardedDeployment(fluxNS, "kustomize-controller", 3)
 		stop, _ = startOperator(operator.Config{
 			FluxControllers: []types.NamespacedName{{Namespace: fluxNS, Name: "kustomize-controller"}},
 			FluxStopTimeout: time.Minute,
 		})
-		guarded := createGuardedDeployment(ns, "guarded")
+		guarded := createGuardedDeployment(ns, "guarded", 3)
 		createApplication(ns, "guarded", workload(shutdownv1alpha1.WorkloadKindDeployment, "guarded"))
 
 		status := createPlan()
@@ -96,6 +96,41 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		Expect(replicasOf(kustomize)()).To(Equal(int32(3)))
 	})
 
+	It("sends no dry run for a workload that a real shutdown does not patch, because its replicas are already 0", func() {
+		fluxNS := newNamespace()
+		DeferCleanup(cleanUp, fluxNS)
+		createGuardedDeployment(fluxNS, "kustomize-controller", 0)
+		stop, _ = startOperator(operator.Config{
+			FluxControllers: []types.NamespacedName{{Namespace: fluxNS, Name: "kustomize-controller"}},
+			FluxStopTimeout: time.Minute,
+		})
+		createGuardedDeployment(ns, "idle", 0)
+		createApplication(ns, "idle", workload(shutdownv1alpha1.WorkloadKindDeployment, "idle"))
+
+		status := createPlan()
+
+		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultOK))
+		Expect(findingsWith(status, shutdownv1alpha1.ReasonPatchRejected)).To(BeEmpty())
+	})
+
+	It("reports a dry run that fails with a server error as an Error, and still writes the plan", func() {
+		stop, _ = startOperator(operator.Config{})
+		createStuckDeployment(ns, "web")
+		createApplication(ns, "shop", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+
+		status := createPlan()
+
+		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultErrors))
+		Expect(findingsWith(status, shutdownv1alpha1.ReasonPatchFailed)).To(ConsistOf(SatisfyAll(
+			HaveField("Severity", shutdownv1alpha1.SeverityError),
+			HaveField("Applications", ConsistOf(ns+"/shop")),
+			HaveField("Message", ContainSubstring("failed calling webhook")),
+			HaveField("Fallback", ContainSubstring("forced stop")),
+		)))
+		Expect(findingsWith(status, shutdownv1alpha1.ReasonPatchRejected)).To(BeEmpty())
+		Expect(status.Report).To(ContainSubstring("PatchFailed"))
+	})
+
 	It("reports each unlisted workload that runs as a Warning, but not a Flux controller", func() {
 		fluxNS := newNamespace()
 		DeferCleanup(cleanUp, fluxNS)
@@ -112,6 +147,12 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		createVM(ns, "stray-vm", map[string]any{"runStrategy": "Always"})
 		createVMI(ns, "stray-vm")
 		createVM(ns, "halted-vm", map[string]any{"runStrategy": "Halted"})
+		// The run strategy Always tells that the VM runs, so the check does not read its VMI.
+		createVM(ns, "starting-vm", map[string]any{"runStrategy": "Always"})
+		// The run strategy Manual does not tell this, so the check reads the VMI.
+		createVM(ns, "manual-vm", map[string]any{"runStrategy": "Manual"})
+		createVMI(ns, "manual-vm")
+		createVM(ns, "stopped-manual-vm", map[string]any{"runStrategy": "Manual"})
 
 		status := createPlan()
 
@@ -125,6 +166,8 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 			HaveField("Message", ContainSubstring("Deployment "+ns+"/stray ")),
 			HaveField("Message", ContainSubstring("StatefulSet "+ns+"/stray-db ")),
 			HaveField("Message", ContainSubstring("VirtualMachine "+ns+"/stray-vm ")),
+			HaveField("Message", ContainSubstring("VirtualMachine "+ns+"/starting-vm ")),
+			HaveField("Message", ContainSubstring("VirtualMachine "+ns+"/manual-vm ")),
 		))
 		Expect(status.Report).To(ContainSubstring("UnmanagedWorkload"))
 	})
@@ -143,6 +186,14 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		// An unset VM value counts as 30 seconds.
 		createVM(ns, "windows-vm", map[string]any{"runStrategy": "Always"})
 		createVM(ns, "linux-vm", map[string]any{"runStrategy": "Always"})
+		// A real shutdown stops no pod of a workload that does not run, so these give no finding.
+		setTerminationGracePeriod(createDeployment(ns, "idle", 0), 60)
+		createVM(ns, "halted-vm", map[string]any{
+			"runStrategy": "Halted",
+			"template":    map[string]any{"spec": map[string]any{"terminationGracePeriodSeconds": int64(120)}},
+		})
+		createApplication(ns, "idle", workload(shutdownv1alpha1.WorkloadKindDeployment, "idle"))
+		createApplication(ns, "halted", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "halted-vm"))
 		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
 		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindStatefulSet, "db"))
 		createApplication(ns, "api", workload(shutdownv1alpha1.WorkloadKindDeployment, "api"))
