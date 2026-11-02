@@ -30,6 +30,7 @@ const (
 	ReasonDepthAboveLimit   = "DepthAboveLimit"
 	ReasonUnknownDependency = "UnknownDependency"
 	ReasonMissingWorkload   = "MissingWorkload"
+	ReasonOperatorWorkload  = "OperatorWorkload"
 	ReasonGracePeriodShrink = "GracePeriodShrink"
 
 	ReasonPatchRejected                 = "PatchRejected"

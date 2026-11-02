@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "labels.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "labels.common" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "name" . }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: operator
+          image: "{{ .Values.registry.domain }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          args:
+            - --health-probe-bind-address=:8081
+            - --api-bind-address=:8082
+            - --api-token-file=/etc/pod-shutdown-operator/token/token
+            - --operator-deployment={{ .Release.Namespace }}/{{ include "name" . }}
+            - --flux-controllers={{ join "," .Values.operator.fluxControllers }}
+            - --flux-stop-timeout={{ .Values.operator.fluxStopTimeout }}
+            - --scale-up-timeout={{ .Values.operator.scaleUpTimeout }}
+            - --statefulset-scale-up-delay={{ .Values.operator.statefulSetScaleUpDelay }}
+            - --stale-limit={{ .Values.operator.staleLimit }}
+            - --shutdown-plan-ttl={{ .Values.operator.shutdownPlanTTL }}
+            - --poll-interval={{ .Values.operator.pollInterval }}
+          env:
+            # The node name is the key of the own boot ID in the record.
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - name: api
+              containerPort: 8082
+            - name: probes
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: token
+              mountPath: /etc/pod-shutdown-operator/token
+              readOnly: true
+      volumes:
+        - name: token
+          secret:
+            secretName: {{ include "tokenSecret" . }}

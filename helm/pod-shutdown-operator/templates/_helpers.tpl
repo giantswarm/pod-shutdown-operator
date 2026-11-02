@@ -36,3 +36,10 @@ Selector labels
 app.kubernetes.io/name: {{ include "name" . | quote }}
 app.kubernetes.io/instance: {{ .Release.Name | quote }}
 {{- end -}}
+
+{{/*
+The name of the Secret with the token of the HTTP endpoint.
+*/}}
+{{- define "tokenSecret" -}}
+{{- .Values.api.existingSecret | default (printf "%s-api-token" (include "name" .)) -}}
+{{- end -}}

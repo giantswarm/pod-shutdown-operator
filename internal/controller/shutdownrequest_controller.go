@@ -28,6 +28,9 @@ type ShutdownRequestReconciler struct {
 	// FluxControllers are the Flux controller Deployments that the operator scales to 0 before it stops an application.
 	FluxControllers []types.NamespacedName
 
+	// OperatorDeployment is the Deployment of the operator. The operator never stops it.
+	OperatorDeployment types.NamespacedName
+
 	// FluxStopTimeout is the longest time that the shutdown waits for the pods of the Flux controllers to end.
 	FluxStopTimeout time.Duration
 
@@ -67,8 +70,7 @@ type ShutdownRequestReconciler struct {
 // +kubebuilder:rbac:groups=subresources.kubevirt.io,resources=virtualmachines/start;virtualmachines/stop,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=list
-// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// The Role in the Helm chart gives the rights for the leader election lease and its events, only in the namespace of the operator.
 
 // Reconcile moves the ShutdownRequest through its phases.
 func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

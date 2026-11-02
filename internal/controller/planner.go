@@ -23,13 +23,16 @@ type planner struct {
 	reader          client.Reader
 	fluxControllers []types.NamespacedName
 
+	// operatorDeployment is the Deployment of the operator. The record skips it, so a shutdown never stops it.
+	operatorDeployment types.NamespacedName
+
 	// dryRun and bootIDFile are for the cluster checks of a ShutdownPlan.
 	dryRun     client.Writer
 	bootIDFile string
 }
 
 func (r *ShutdownRequestReconciler) planner() planner {
-	return planner{reader: r.Client, fluxControllers: r.FluxControllers}
+	return planner{reader: r.Client, fluxControllers: r.FluxControllers, operatorDeployment: r.OperatorDeployment}
 }
 
 // plan returns the plan of a shutdown and its findings as a ShutdownPlan status.
@@ -262,7 +265,8 @@ func unknownFindings(keys []string, unknown map[string][]string) []shutdownv1alp
 	return findings
 }
 
-// missingFindings returns an Error for each listed workload that is not in the record and does not exist.
+// missingFindings returns an Error for each listed workload that is not in the record and does not exist,
+// and for each listed Deployment of the operator.
 func (p planner) missingFindings(ctx context.Context, recorded []shutdownv1alpha1.RecordedApplication) ([]shutdownv1alpha1.Finding, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
 	if err := p.reader.List(ctx, &apps); err != nil {
@@ -277,6 +281,16 @@ func (p planner) missingFindings(ctx context.Context, recorded []shutdownv1alpha
 	for _, app := range recorded {
 		key := appKey(app.Namespace, app.Name)
 		for _, ref := range specs[key].Workloads {
+			if p.isOperator(app.Namespace, ref) {
+				findings = append(findings, shutdownv1alpha1.Finding{
+					Severity:     shutdownv1alpha1.SeverityError,
+					Reason:       shutdownv1alpha1.ReasonOperatorWorkload,
+					Applications: []string{key},
+					Message:      fmt.Sprintf("The listed workload %s %s is the operator.", ref.Kind, ref.Name),
+					Fallback:     "Skip the workload. The operator runs until the node power-off.",
+				})
+				continue
+			}
 			if slices.ContainsFunc(app.Workloads, func(w shutdownv1alpha1.RecordedWorkload) bool {
 				return w.Kind == ref.Kind && w.Name == ref.Name
 			}) {

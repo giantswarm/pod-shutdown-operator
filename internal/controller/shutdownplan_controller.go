@@ -18,6 +18,9 @@ type ShutdownPlanReconciler struct {
 	Client          client.Client
 	FluxControllers []types.NamespacedName
 
+	// OperatorDeployment is the Deployment of the operator. The plan reports an application that lists it.
+	OperatorDeployment types.NamespacedName
+
 	// FluxStopTimeout sets the start of the groups in the plan.
 	FluxStopTimeout time.Duration
 
@@ -50,10 +53,11 @@ func (r *ShutdownPlanReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// The status is a snapshot, so the operator writes it once.
 	if plan.Status.ComputedAt == nil {
 		p := planner{
-			reader:          r.Client,
-			fluxControllers: r.FluxControllers,
-			dryRun:          client.NewDryRunClient(r.Client),
-			bootIDFile:      r.BootIDFile,
+			reader:             r.Client,
+			fluxControllers:    r.FluxControllers,
+			operatorDeployment: r.OperatorDeployment,
+			dryRun:             client.NewDryRunClient(r.Client),
+			bootIDFile:         r.BootIDFile,
 		}
 		status, err := p.plan(ctx, r.FluxStopTimeout, r.Clock.Now())
 		if err != nil {

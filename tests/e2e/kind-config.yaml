@@ -1,0 +1,11 @@
+# The operator runs on the control-plane node, and the test workloads run on the worker.
+# The port mapping makes the NodePort of the HTTP endpoint reachable from the test.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30082
+        hostPort: 30082
+        listenAddress: 127.0.0.1
+  - role: worker

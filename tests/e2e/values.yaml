@@ -1,0 +1,16 @@
+# The values of the chart in the e2e tests.
+image:
+  tag: e2e
+# Two pods test the leader election.
+replicas: 2
+api:
+  token: e2e-token
+operator:
+  # The test creates these Deployments to play the Flux controllers.
+  fluxControllers:
+    - flux-system/kustomize-controller
+    - flux-system/helm-controller
+  fluxStopTimeout: 10s
+  # A long delay is easy to see in the test.
+  statefulSetScaleUpDelay: 20s
+  pollInterval: 1s
