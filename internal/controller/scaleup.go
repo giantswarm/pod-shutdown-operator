@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -62,9 +63,15 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	pastLimit := time.Since(startedAt.Time) >= r.ScaleUpTimeout
 
 	apps := request.Status.RecordedState.Applications
+	log := ctrl.LoggerFrom(ctx)
 	deps, _, err := r.planner().dependencies(ctx, apps)
-	if err != nil {
-		return ctrl.Result{}, err
+	// Past the global time limit, canStart does not use the dependencies, so a failed read must not keep Flux at 0.
+	// The error does not go back to controller-runtime, because its backoff can delay the scale-up past the limit.
+	if err != nil && pastLimit {
+		log.Error(err, "Failed to read the dependencies at the global time limit, starts each application")
+	} else if err != nil {
+		log.Error(err, "Failed to read the dependencies, tries again at the next poll")
+		return ctrl.Result{RequeueAfter: r.PollInterval}, nil
 	}
 	deps = cyclesAsSteps(deps)
 
@@ -76,6 +83,7 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	}
 	// The loop repeats while an application becomes done, so that a chain can go past more than one step in one reconcile.
 	attempted := map[string]bool{}
+	var errs []error
 	// canStart returns true when the application is not yet ready or degraded, when this reconcile
 	// has not yet tried to start it, and when all its dependencies are ready or degraded.
 	// Past the global time limit, an application starts with no wait for its dependencies.
@@ -98,11 +106,10 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 			}
 			if !state.ready {
 				ready, err := r.startApplication(ctx, app)
-				// Past the global time limit, a failed write must not keep Flux at 0, so the application becomes degraded.
-				if err != nil && pastLimit {
-					ctrl.LoggerFrom(ctx).Error(err, "Failed to start the application at the global time limit", "application", key)
-				} else if err != nil {
-					return ctrl.Result{}, err
+				// A failed start must not block the other applications. The application is not ready for this poll,
+				// and it becomes degraded at its readyTimeout or at the global time limit.
+				if err != nil {
+					errs = append(errs, err)
 				}
 				state.ready = ready
 			}
@@ -112,16 +119,20 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 				continue
 			}
 
-			timeout, err := r.readyTimeout(ctx, app.Namespace, app.Name)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
 			// Past the global time limit, an application that is not ready becomes degraded at once.
-			if time.Since(state.startedAt) > timeout || pastLimit {
-				degraded = append(degraded, key)
-				done[key] = true
-				progress = true
+			if !pastLimit {
+				timeout, err := r.readyTimeout(ctx, app.Namespace, app.Name)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				if time.Since(state.startedAt) <= timeout {
+					continue
+				}
 			}
+			degraded = append(degraded, key)
+			done[key] = true
+			progress = true
 		}
 	}
 	pending := len(done) < len(apps)
@@ -143,6 +154,9 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 			return ctrl.Result{}, fmt.Errorf("write the scale-up progress: %w", err)
 		}
 	}
+	if len(errs) > 0 {
+		log.Error(errors.Join(errs...), "Failed to start some applications, each becomes degraded at its readyTimeout or at the global time limit")
+	}
 	if !pending {
 		return ctrl.Result{}, nil
 	}
@@ -153,12 +167,18 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 // It returns true when all of them are ready.
 func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication) (bool, error) {
 	ready := true
+	var errs []error
 	for _, w := range app.Workloads {
 		workloadReady, err := r.startWorkload(ctx, app.Namespace, w)
+		// An error on one workload does not stop the start of the other workloads.
 		if err != nil {
-			return false, err
+			errs = append(errs, err)
+			continue
 		}
 		ready = ready && workloadReady
+	}
+	if len(errs) > 0 {
+		return false, errors.Join(errs...)
 	}
 	return ready, nil
 }

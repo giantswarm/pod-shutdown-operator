@@ -71,6 +71,13 @@ func createGuardedDeployment(ns, deployment string, replicas int32) client.Objec
 // backend has stopped. It waits until the API server applies the webhook.
 func createStuckDeployment(ns, name string) client.Object {
 	d := createDeployment(ns, name, 1)
+	makeStuck(ns, d)
+	return d
+}
+
+// makeStuck adds an admission webhook that cannot be reached to a Deployment that exists.
+// It waits until the API server applies the webhook.
+func makeStuck(ns string, d client.Object) {
 	Expect(k8sClient.Patch(ctx, d, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"stuck":"true"}}}`)))).To(Succeed())
 
 	webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{
@@ -104,7 +111,6 @@ func createStuckDeployment(ns, name string) client.Object {
 	Eventually(func() error {
 		return k8sClient.Patch(ctx, d, scaleToZero, client.DryRunAll)
 	}).Should(MatchError(ContainSubstring("failed calling webhook")))
-	return d
 }
 
 var _ = Describe("The fallback rules in a real shutdown", func() {

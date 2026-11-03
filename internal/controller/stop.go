@@ -232,6 +232,18 @@ func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace 
 	}
 
 	replicas, selector := replicasAndSelector(obj)
+	// Just after a scale-up patch, the cache can still show 0, so a live read confirms the 0.
+	// A patch that changes nothing still goes through admission, so the operator does not send it.
+	if ptr.Deref(replicas, 1) == 0 {
+		err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+		}
+		replicas, selector = replicasAndSelector(obj)
+	}
 	if ptr.Deref(replicas, 1) != 0 {
 		err := retryOnce(func() error { return r.Client.Patch(ctx, obj, scaleToZero) })
 		if apierrors.IsNotFound(err) {

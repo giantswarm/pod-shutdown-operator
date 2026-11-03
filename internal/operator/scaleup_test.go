@@ -165,6 +165,32 @@ var _ = Describe("A scale-up from the record", func() {
 		Expect(replicasOf(slow)()).To(Equal(int32(1)))
 	})
 
+	It("starts the other workloads and applications when the start of one workload fails", func() {
+		api := createDeployment(ns, "api", 1)
+		worker := createDeployment(ns, "worker", 2)
+		web := createDeployment(ns, "web", 3)
+		createApplication(ns, "api",
+			workload(shutdownv1alpha1.WorkloadKindDeployment, "api"),
+			workload(shutdownv1alpha1.WorkloadKindDeployment, "worker"),
+		)
+		createApplication(ns, "web", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		setReadyTimeout(ns, "api", 2*time.Second)
+		completeShutdown()
+		makeStuck(ns, api)
+
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(replicasOf(worker)).Should(Equal(int32(2)))
+		Eventually(replicasOf(web)).Should(Equal(int32(3)))
+		markReady(worker, 2)
+		markReady(web, 3)
+
+		// The application with the failed workload becomes degraded at its readyTimeout, before the global time limit.
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(getRequest().Status.Degraded).To(ConsistOf(ns + "/api"))
+		Expect(replicasOf(api)()).To(BeZero())
+	})
+
 	It("waits for Deployment availableReplicas and StatefulSet readyReplicas of the current generation", func() {
 		web := createDeployment(ns, "web", 2)
 		db := createStatefulSet(ns, "db", 1)
