@@ -25,6 +25,12 @@ const unmanagedTimeout = 5 * time.Second
 // It changes no workload. The update uses the resource version of the request,
 // so a stale read fails with a conflict and the record is never written twice.
 func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
+	// A record with no entry for a node gives a false power cycle when the leader moves to that node.
+	// No workload has changed yet, so the next reconcile can try again.
+	bootIDs, err := r.currentBootIDs(ctx)
+	if err != nil {
+		return err
+	}
 	record, err := r.planner().recordState(ctx)
 	if err != nil {
 		return err
@@ -42,7 +48,7 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     record,
-		BootIDs:           r.currentBootIDs(ctx),
+		BootIDs:           bootIDs,
 		Unmanaged:         unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             int32(len(record.Applications)), //nolint:gosec // The number of applications is small.
@@ -59,14 +65,18 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 // reuseRecord returns a ScalingUp request to ShuttingDown with the same record. It changes no workload.
 // One worker reconciles the request, so the scale-up steps of an earlier reconcile have ended.
 func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
+	// A power cycle can come before the reuse, so the boot IDs are read again.
+	bootIDs, err := r.currentBootIDs(ctx)
+	if err != nil {
+		return err
+	}
 	now := metav1.Now()
 	updated := request.DeepCopy()
 	// The new status keeps the fields from the start of the first shutdown. The new start time gives the whole budget again.
-	// A power cycle can come before the reuse, so the boot IDs are read again.
 	updated.Status = shutdownv1alpha1.ShutdownRequestStatus{
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     request.Status.RecordedState,
-		BootIDs:           r.currentBootIDs(ctx),
+		BootIDs:           bootIDs,
 		Unmanaged:         request.Status.Unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             request.Status.Total,
