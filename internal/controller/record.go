@@ -9,6 +9,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,7 +93,7 @@ func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shut
 }
 
 // recordState reads the state of each listed workload.
-// It skips a listed workload that does not exist.
+// It skips a listed workload that does not exist, and the Deployment of the operator.
 func (p planner) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedState, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
 	if err := p.reader.List(ctx, &apps); err != nil {
@@ -103,6 +104,10 @@ func (p planner) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedSta
 	for _, app := range apps.Items {
 		recorded := shutdownv1alpha1.RecordedApplication{Namespace: app.Namespace, Name: app.Name}
 		for _, ref := range app.Spec.Workloads {
+			// The operator must run to the end of the shutdown.
+			if p.isOperator(app.Namespace, ref) {
+				continue
+			}
 			w, found, err := p.recordWorkload(ctx, app.Namespace, ref)
 			if err != nil {
 				return nil, err
@@ -124,6 +129,12 @@ func (p planner) recordState(ctx context.Context) (*shutdownv1alpha1.RecordedSta
 	}
 	record.FluxControllers = fluxControllers
 	return record, nil
+}
+
+// isOperator returns true when ref is the Deployment of the operator.
+func (p planner) isOperator(namespace string, ref shutdownv1alpha1.WorkloadReference) bool {
+	return ref.Kind == shutdownv1alpha1.WorkloadKindDeployment &&
+		(types.NamespacedName{Namespace: namespace, Name: ref.Name}) == p.operatorDeployment
 }
 
 // recordWorkload returns the recorded state of one workload. It returns false when the workload does not exist.

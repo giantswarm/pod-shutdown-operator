@@ -255,7 +255,8 @@ func recordedRunning(w shutdownv1alpha1.RecordedWorkload) bool {
 }
 
 // unmanaged returns the Deployments and StatefulSets with replicas above 0, and the VMs that run, that no
-// ManagedApplication lists. It skips the Flux controllers, because a real shutdown scales them.
+// ManagedApplication lists. It skips the Flux controllers, because a real shutdown scales them,
+// and the Deployment of the operator, because it must run.
 // The field that a VM uses tells if it runs. Only when the run strategy does not tell this, the VMI tells it.
 func (p planner) unmanaged(ctx context.Context) ([]shutdownv1alpha1.UnmanagedWorkload, error) {
 	var apps shutdownv1alpha1.ManagedApplicationList
@@ -271,6 +272,8 @@ func (p planner) unmanaged(ctx context.Context) ([]shutdownv1alpha1.UnmanagedWor
 	for _, c := range p.fluxControllers {
 		listed[shutdownv1alpha1.UnmanagedWorkload{Namespace: c.Namespace, Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: c.Name}] = true
 	}
+	operator := p.operatorDeployment
+	listed[shutdownv1alpha1.UnmanagedWorkload{Namespace: operator.Namespace, Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: operator.Name}] = true
 
 	var unmanaged []shutdownv1alpha1.UnmanagedWorkload
 	add := func(namespace string, kind shutdownv1alpha1.WorkloadKind, name string, runs bool) {

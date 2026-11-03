@@ -10,7 +10,7 @@ appVersion: 0.0.1
 name: pod-shutdown-operator
 
 # Please describe what the app provides in a sentence or two.
-description: Please add description
+description: A Kubernetes operator that stops applications in dependency order before a cluster shutdown, and restores them at power-on.
 
 # URL of the GitHub repository that is the source of this Chart.yaml file.
 home: https://github.com/giantswarm/pod-shutdown-operator
@@ -21,7 +21,7 @@ home: https://github.com/giantswarm/pod-shutdown-operator
 icon: https://s.giantswarm.io/app-icons/giantswarm/1/light.svg
 
 sources:
-- https://github.com/some-org/some-repo
+- https://github.com/giantswarm/pod-shutdown-operator
 version: 0.0.0-dev
 annotations:
   # Adapt to 'giantswarm' if this application is not to be deployed by customers

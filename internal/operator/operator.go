@@ -36,6 +36,9 @@ type Config struct {
 	// FluxControllers are the Flux controller Deployments that the operator scales to 0 before it stops an application.
 	FluxControllers []types.NamespacedName
 
+	// OperatorDeployment is the Deployment of the operator. The operator never stops it. Empty means none.
+	OperatorDeployment types.NamespacedName
+
 	// FluxStopTimeout is the longest time that the shutdown waits for the pods of the Flux controllers to end.
 	FluxStopTimeout time.Duration
 
@@ -91,6 +94,7 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		PollInterval:            c.PollInterval,
 		StatefulSetScaleUpDelay: c.StatefulSetScaleUpDelay,
 		FluxControllers:         c.FluxControllers,
+		OperatorDeployment:      c.OperatorDeployment,
 		FluxStopTimeout:         c.FluxStopTimeout,
 		ScaleUpTimeout:          c.ScaleUpTimeout,
 		VirtualMachines:         vmActions,
@@ -104,12 +108,13 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	}
 
 	planReconciler := &controller.ShutdownPlanReconciler{
-		Client:          client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
-		FluxControllers: c.FluxControllers,
-		FluxStopTimeout: c.FluxStopTimeout,
-		TTL:             c.ShutdownPlanTTL,
-		BootIDFile:      c.BootIDFile,
-		Clock:           c.Clock,
+		Client:             client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+		FluxControllers:    c.FluxControllers,
+		OperatorDeployment: c.OperatorDeployment,
+		FluxStopTimeout:    c.FluxStopTimeout,
+		TTL:                c.ShutdownPlanTTL,
+		BootIDFile:         c.BootIDFile,
+		Clock:              c.Clock,
 	}
 	if err := planReconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownPlan controller: %w", err)

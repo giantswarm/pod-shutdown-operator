@@ -1,8 +1,113 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$defs": {
+        "_definitions.json": {
+            "definitions": {
+                "io.k8s.api.core.v1.ResourceClaim": {
+                    "type": "object",
+                    "description": "ResourceClaim references one entry in PodSpec.ResourceClaims.",
+                    "required": [
+                        "name"
+                    ],
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name must match the name of one entry in pod.spec.resourceClaims of the Pod where this field is used. It makes that resource available inside a container."
+                        },
+                        "request": {
+                            "type": "string",
+                            "description": "Request is the name chosen for a request in the referenced claim. If empty, everything from the claim is made available, otherwise only the result of this request."
+                        }
+                    }
+                },
+                "io.k8s.api.core.v1.ResourceRequirements": {
+                    "type": "object",
+                    "description": "ResourceRequirements describes the compute resource requirements.",
+                    "properties": {
+                        "claims": {
+                            "type": "array",
+                            "description": "Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.\n\nThis is an alpha field and requires enabling the DynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers.",
+                            "items": {
+                                "$ref": "#/$defs/_definitions.json/definitions/io.k8s.api.core.v1.ResourceClaim"
+                            }
+                        },
+                        "limits": {
+                            "type": "object",
+                            "description": "Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+                            "additionalProperties": {
+                                "$ref": "#/$defs/_definitions.json/definitions/io.k8s.apimachinery.pkg.api.resource.Quantity"
+                            }
+                        },
+                        "requests": {
+                            "type": "object",
+                            "description": "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+                            "additionalProperties": {
+                                "$ref": "#/$defs/_definitions.json/definitions/io.k8s.apimachinery.pkg.api.resource.Quantity"
+                            }
+                        }
+                    }
+                },
+                "io.k8s.api.core.v1.Toleration": {
+                    "type": "object",
+                    "description": "The pod this Toleration is attached to tolerates any taint that matches the triple <key,value,effect> using the matching operator <operator>.",
+                    "properties": {
+                        "effect": {
+                            "type": "string",
+                            "description": "Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute."
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys."
+                        },
+                        "operator": {
+                            "type": "string",
+                            "description": "Operator represents a key's relationship to the value. Valid operators are Exists and Equal. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category."
+                        },
+                        "tolerationSeconds": {
+                            "type": "integer",
+                            "description": "TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system.",
+                            "format": "int64"
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string."
+                        }
+                    }
+                },
+                "io.k8s.apimachinery.pkg.api.resource.Quantity": {
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "number"
+                        }
+                    ]
+                }
+            }
+        }
+    },
     "type": "object",
     "additionalProperties": false,
     "properties": {
+        "api": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "existingSecret": {
+                    "type": "string",
+                    "description": "The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`. Empty means that the chart creates the Secret from `api.token`."
+                },
+                "nodePort": {
+                    "type": "integer",
+                    "description": "The node port of the HTTP endpoint. The callers send their calls to this port on a node."
+                },
+                "token": {
+                    "type": "string",
+                    "description": "The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty."
+                }
+            }
+        },
         "baseDomain": {
             "type": "string"
         },
@@ -66,12 +171,59 @@
                     "type": "string"
                 },
                 "tag": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The image tag. Empty means the appVersion of the chart."
                 }
             }
         },
         "managementCluster": {
             "type": "string"
+        },
+        "nodeSelector": {
+            "type": "object",
+            "description": "The operator runs on a control-plane node, so that it stays alive to the end of the shutdown.",
+            "additionalProperties": true
+        },
+        "operator": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "fluxControllers": {
+                    "type": "array",
+                    "description": "The Flux controller Deployments, as namespace/name. The operator scales them to 0 before it stops an application. An empty list disables the Flux step.",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "fluxStopTimeout": {
+                    "type": "string",
+                    "description": "The longest time that the shutdown waits for the pods of the Flux controllers to end."
+                },
+                "pollInterval": {
+                    "type": "string",
+                    "description": "The interval between checks while pods end and while workloads become ready."
+                },
+                "scaleUpTimeout": {
+                    "type": "string",
+                    "description": "The global time limit of the scale-up."
+                },
+                "shutdownPlanTTL": {
+                    "type": "string",
+                    "description": "The age after which the operator deletes a ShutdownPlan."
+                },
+                "staleLimit": {
+                    "type": "string",
+                    "description": "The age after which a request with no phase is stale."
+                },
+                "statefulSetScaleUpDelay": {
+                    "type": "string",
+                    "description": "The time that a StatefulSet scale-up waits after a forced delete of its pods."
+                }
+            }
+        },
+        "priorityClassName": {
+            "type": "string",
+            "description": "The PriorityClass of the operator pods. A high priority keeps the operator until the node power-off."
         },
         "provider": {
             "type": "string"
@@ -85,8 +237,37 @@
                 }
             }
         },
+        "replicas": {
+            "type": "integer",
+            "description": "The number of operator pods. Only the holder of the leader election lease acts."
+        },
+        "resources": {
+            "$ref": "#/$defs/_definitions.json/definitions/io.k8s.api.core.v1.ResourceRequirements",
+            "type": "object",
+            "unevaluatedProperties": false
+        },
         "subscriptionID": {
             "type": "string"
+        },
+        "tolerations": {
+            "type": "array",
+            "description": "The tolerations that let the operator run on a control-plane node.",
+            "items": {
+                "$ref": "#/$defs/_definitions.json/definitions/io.k8s.api.core.v1.Toleration",
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "operator": {
+                        "type": "string"
+                    }
+                },
+                "unevaluatedProperties": false
+            }
         }
     }
 }

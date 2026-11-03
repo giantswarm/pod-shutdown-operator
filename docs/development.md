@@ -6,7 +6,7 @@ After a change to the API types in `api/v1alpha1` or to an RBAC marker, run:
 
     make generate manifests
 
-This command writes `zz_generated.deepcopy.go`, the CRDs in `config/crd/bases`, and the ClusterRole in `config/rbac/role.yaml`. Commit the result. CI fails when these files are out of date.
+This command writes `zz_generated.deepcopy.go`, the CRDs in `helm/pod-shutdown-operator/files/crds`, and the ClusterRole in `helm/pod-shutdown-operator/files/rbac/role.yaml`. The Helm chart reads these files. Commit the result. CI fails when these files are out of date.
 
 ## Run the tests
 
@@ -17,3 +17,17 @@ envtest also runs no KubeVirt. The tests install minimal KubeVirt CRDs from `int
     make test-envtest
 
 The target downloads the tools and the envtest binaries into `bin/`. The test files have the build tag `envtest`, so `make test` does not run them.
+
+## Run the end-to-end tests
+
+The end-to-end tests run the operator image in a `kind` cluster with one control-plane node and one worker. They use the Kubernetes API and the HTTP endpoint. They play the Flux controllers with Deployments of their own.
+
+    make test-e2e
+
+The target builds the binary and the image, creates the cluster, loads the image, and installs the chart with `tests/e2e/values.yaml`. It needs `docker`, `helm`, and `kubectl`. With podman, set two variables:
+
+    CONTAINER_TOOL=podman KIND_EXPERIMENTAL_PROVIDER=podman make test-e2e
+
+The cluster stays after the tests, so a new run is faster. The kubeconfig is `bin/e2e/kubeconfig`. Delete the cluster with `make e2e-delete`.
+
+The test files have the build tag `e2e`, so `make test` and `make test-envtest` do not run them.

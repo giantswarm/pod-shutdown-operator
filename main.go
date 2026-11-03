@@ -28,7 +28,7 @@ const (
 var setupLog = ctrl.Log.WithName("setup")
 
 func main() {
-	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName, fluxControllerList string
+	var metricsAddr, probeAddr, leaderElectionNamespace, apiAddr, apiTokenFile, bootIDFile, nodeName, fluxControllerList, operatorDeploymentName string
 	var enableLeaderElection bool
 	var pollInterval, statefulSetScaleUpDelay, staleLimit, fluxStopTimeout, scaleUpTimeout, shutdownPlanTTL time.Duration
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address of the HTTP metrics endpoint, for example :8080. "+
@@ -55,6 +55,9 @@ func main() {
 	flag.StringVar(&fluxControllerList, "flux-controllers", "flux-system/kustomize-controller,flux-system/helm-controller",
 		"The Flux controller Deployments, as a comma-separated list of namespace/name. The operator scales them to 0 "+
 			"before it stops an application, and back after the scale-up. Empty disables the Flux step.")
+	flag.StringVar(&operatorDeploymentName, "operator-deployment", "",
+		"The Deployment of the operator, as namespace/name. The operator never stops it, also when a ManagedApplication lists it. "+
+			"Empty means none.")
 	flag.DurationVar(&fluxStopTimeout, "flux-stop-timeout", 30*time.Second,
 		"The longest time that the shutdown waits for the pods of the Flux controllers to end. "+
 			"Keep it shorter than the termination grace period of the controllers.")
@@ -98,6 +101,11 @@ func main() {
 		setupLog.Error(err, "Set --flux-controllers to a comma-separated list of namespace/name")
 		os.Exit(1)
 	}
+	operatorDeployment, err := parseOperatorDeployment(operatorDeploymentName)
+	if err != nil {
+		setupLog.Error(err, "Set --operator-deployment to namespace/name")
+		os.Exit(1)
+	}
 
 	mgr, err := operator.NewManager(ctrl.GetConfigOrDie(), operator.Config{
 		Manager: ctrl.Options{
@@ -114,6 +122,7 @@ func main() {
 		FieldOwner:              fieldOwner,
 		StatefulSetScaleUpDelay: statefulSetScaleUpDelay,
 		FluxControllers:         fluxControllers,
+		OperatorDeployment:      operatorDeployment,
 		FluxStopTimeout:         fluxStopTimeout,
 		ScaleUpTimeout:          scaleUpTimeout,
 		APIBindAddress:          apiAddr,
@@ -152,11 +161,32 @@ func parseFluxControllers(list string) ([]types.NamespacedName, error) {
 	}
 	var controllers []types.NamespacedName
 	for entry := range strings.SplitSeq(list, ",") {
-		namespace, name, found := strings.Cut(strings.TrimSpace(entry), "/")
-		if !found || namespace == "" || name == "" || strings.Contains(name, "/") {
+		controller, err := parseNamespacedName(entry)
+		if err != nil {
 			return nil, fmt.Errorf("the Flux controller %q is not namespace/name", entry)
 		}
-		controllers = append(controllers, types.NamespacedName{Namespace: namespace, Name: name})
+		controllers = append(controllers, controller)
 	}
 	return controllers, nil
+}
+
+// parseOperatorDeployment parses namespace/name. An empty value gives no Deployment.
+func parseOperatorDeployment(value string) (types.NamespacedName, error) {
+	if value == "" {
+		return types.NamespacedName{}, nil
+	}
+	deployment, err := parseNamespacedName(value)
+	if err != nil {
+		return types.NamespacedName{}, fmt.Errorf("the operator Deployment %q is not namespace/name", value)
+	}
+	return deployment, nil
+}
+
+// parseNamespacedName parses one namespace/name.
+func parseNamespacedName(value string) (types.NamespacedName, error) {
+	namespace, name, found := strings.Cut(strings.TrimSpace(value), "/")
+	if !found || namespace == "" || name == "" || strings.Contains(name, "/") {
+		return types.NamespacedName{}, errors.New("not namespace/name")
+	}
+	return types.NamespacedName{Namespace: namespace, Name: name}, nil
 }

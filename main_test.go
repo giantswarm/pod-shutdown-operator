@@ -38,3 +38,27 @@ func TestParseFluxControllers(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOperatorDeployment(t *testing.T) {
+	tests := []struct {
+		value   string
+		want    types.NamespacedName
+		wantErr bool
+	}{
+		{value: "", want: types.NamespacedName{}},
+		{value: "giantswarm/pod-shutdown-operator", want: types.NamespacedName{Namespace: "giantswarm", Name: "pod-shutdown-operator"}},
+		{value: "pod-shutdown-operator", wantErr: true},
+		{value: "giantswarm/", wantErr: true},
+		{value: "giantswarm/a,giantswarm/b", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := parseOperatorDeployment(tt.value)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("parseOperatorDeployment(%q) error = %v, want an error: %v", tt.value, err, tt.wantErr)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("parseOperatorDeployment(%q) = %v, want %v", tt.value, got, tt.want)
+		}
+	}
+}

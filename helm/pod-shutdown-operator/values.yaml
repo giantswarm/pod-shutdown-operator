@@ -7,6 +7,58 @@
 #
 image:
   name: "giantswarm/pod-shutdown-operator"
+  # -- The image tag. Empty means the appVersion of the chart.
   tag: ""
 registry:
   domain: gsoci.azurecr.io
+
+# -- The number of operator pods. Only the holder of the leader election lease acts.
+replicas: 1
+
+api:
+  # -- The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`.
+  # Empty means that the chart creates the Secret from `api.token`.
+  existingSecret: ""
+  # -- The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty.
+  token: ""
+  # -- The node port of the HTTP endpoint. The callers send their calls to this port on a node.
+  nodePort: 30082
+
+operator:
+  # -- The Flux controller Deployments, as namespace/name. The operator scales them to 0 before it stops an application.
+  # An empty list disables the Flux step.
+  fluxControllers:
+    - flux-system/kustomize-controller
+    - flux-system/helm-controller
+  # -- The longest time that the shutdown waits for the pods of the Flux controllers to end.
+  fluxStopTimeout: 30s
+  # -- The global time limit of the scale-up.
+  scaleUpTimeout: 30m
+  # -- The time that a StatefulSet scale-up waits after a forced delete of its pods.
+  statefulSetScaleUpDelay: 5s
+  # -- The age after which a request with no phase is stale.
+  staleLimit: 5m
+  # -- The age after which the operator deletes a ShutdownPlan.
+  shutdownPlanTTL: 1h
+  # -- The interval between checks while pods end and while workloads become ready.
+  pollInterval: 2s
+
+# -- The PriorityClass of the operator pods. A high priority keeps the operator until the node power-off.
+priorityClassName: system-cluster-critical
+
+# -- The operator runs on a control-plane node, so that it stays alive to the end of the shutdown.
+nodeSelector:  # @schema skipProperties: true; additionalProperties: true
+  node-role.kubernetes.io/control-plane: ""
+
+# -- The tolerations that let the operator run on a control-plane node.
+tolerations:  # @schema item: object; skipProperties: true; itemRef: $k8s/_definitions.json#/definitions/io.k8s.api.core.v1.Toleration
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+resources:  # @schema skipProperties: true; $ref: $k8s/_definitions.json#/definitions/io.k8s.api.core.v1.ResourceRequirements
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
