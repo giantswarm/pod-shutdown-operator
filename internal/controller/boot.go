@@ -70,6 +70,9 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	if err == nil && bootID == recorded {
 		return nil
 	}
+	// A missing own entry also counts as a power cycle, on purpose. The node joined after the record,
+	// or had an empty boot ID at record time. The operator cannot tell this from a power cycle,
+	// and a wrong "no power cycle" keeps the cluster at 0 after a power-on. See #84.
 	// An unknown boot ID counts as a power cycle, so that the cluster does not stay at 0.
 	if err != nil {
 		log.Error(err, "Failed to read the boot ID, counts it as a power cycle")

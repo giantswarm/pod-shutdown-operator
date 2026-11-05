@@ -174,3 +174,38 @@ func TestReconcileAppliesTheStaleLimitUntilARequestPassesIt(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckBootCountsAMissingOwnEntryAsAPowerCycle(t *testing.T) {
+	tests := map[string]shutdownv1alpha1.Phase{
+		"ShuttingDown": shutdownv1alpha1.PhaseShuttingDown,
+		"Complete":     shutdownv1alpha1.PhaseComplete,
+	}
+	for name, phase := range tests {
+		t.Run(name, func(t *testing.T) {
+			// The own node joined after the record, or had an empty boot ID at record time.
+			request := &shutdownv1alpha1.ShutdownRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+				Spec:       shutdownv1alpha1.ShutdownRequestSpec{Action: shutdownv1alpha1.ActionShutdown},
+				Status: shutdownv1alpha1.ShutdownRequestStatus{
+					Phase:   phase,
+					BootIDs: map[string]string{"node-b": "boot-b"},
+				},
+			}
+			r, c := newBootTestReconciler(t, request, false, interceptor.Funcs{})
+			current := getTestRequest(t, c)
+
+			// The operator cannot tell this from a power cycle, so it scales up.
+			if err := r.checkBoot(context.Background(), &current); err != nil {
+				t.Fatalf("checkBoot: %v", err)
+			}
+			got := getTestRequest(t, c)
+			if got.Spec.Action != shutdownv1alpha1.ActionCancel {
+				t.Errorf("action: got %q, want %q", got.Spec.Action, shutdownv1alpha1.ActionCancel)
+			}
+			// A later restart in this boot then compares the own entry and does not revert a new Shutdown.
+			if bootID := got.Status.BootIDs[testNode]; bootID != "boot-a" {
+				t.Errorf("own boot ID: got %q, want boot-a", bootID)
+			}
+		})
+	}
+}

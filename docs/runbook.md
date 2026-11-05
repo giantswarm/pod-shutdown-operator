@@ -34,6 +34,23 @@ The operator keeps the state of the last shutdown in the `ShutdownRequest` with 
 
 The field `status.phase` is `ShuttingDown`, `Complete`, `ScalingUp`, or `Restored`. The field `status.recordedState` holds the replica counts from the start of the shutdown.
 
+## Start a shutdown again after a false power cycle
+
+At each start, the operator compares the boot ID of its node with the record in `status.bootIDs`. A different boot ID means a power cycle. The operator then sets the action `Cancel` and scales the cluster up from the record.
+
+The operator also does this when the record has no entry for its node. This occurs when the leader moves to a node that joined after the start of the shutdown, or to a node that had an empty boot ID at that time. The operator cannot tell this from a power cycle. It scales up on purpose, because a wrong guess the other way keeps the cluster at 0 after a power-on.
+
+The log of the new leader then shows the message `Found a power cycle, scales up from the record` with an empty `recordedBootID`. The empty value shows that the record had no entry for the node:
+
+    kubectl --namespace giantswarm logs --selector app.kubernetes.io/name=pod-shutdown-operator --tail -1 | grep 'Found a power cycle'
+
+Do these steps:
+
+1. Make sure that no power cycle occurred. Most nodes must have an uptime that is longer than the time since the start of the shutdown.
+2. If the shutdown must go on, call `POST /shutdown` again. In `ScalingUp`, the operator returns to the shutdown with the same record. In `Restored`, the call starts a new shutdown.
+
+The operator writes the boot ID of the new leader node to the record. A later restart on the same boot then does not cancel the shutdown again.
+
 ## Scale the Flux controllers back by hand
 
 The operator scales the Flux controllers to 0 at the start of a shutdown. It scales them back at the end of the scale-up. If the operator cannot do this, for example because it crashes in a loop, the cluster stays with Flux at 0. Then Flux cannot repair anything.
