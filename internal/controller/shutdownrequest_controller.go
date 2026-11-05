@@ -49,7 +49,13 @@ type ShutdownRequestReconciler struct {
 
 	Clock clock.PassiveClock
 
+	// LeaderIdentity returns the leader election identity of the current leader, which is this process.
+	LeaderIdentity func(context.Context) (string, error)
+
 	bootChecked bool
+
+	// identity is the leader election identity of this process, after the first read.
+	identity string
 
 	// staleChecked is true after a request with no phase passes the stale check in this process.
 	// A young request whose start fails for longer than the stale limit is then not stale.

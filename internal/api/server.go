@@ -49,6 +49,9 @@ type Server struct {
 
 	// Clock gives the age of a request, so that a test can set it.
 	Clock clock.PassiveClock
+
+	// LeaderIdentity returns the leader election identity of the current leader.
+	LeaderIdentity func(context.Context) (string, error)
 }
 
 // Progress is the response of GET /progress. It holds no application names.
@@ -223,7 +226,7 @@ func (s *Server) progress(w http.ResponseWriter, r *http.Request) {
 		status := request.Status
 		p = Progress{
 			Phase:    status.Phase,
-			Complete: status.Phase == shutdownv1alpha1.PhaseComplete,
+			Complete: status.Phase == shutdownv1alpha1.PhaseComplete && s.bootChecked(r.Context(), status),
 			Stopped:  status.Stopped,
 			Total:    status.Total,
 		}
@@ -238,4 +241,20 @@ func (s *Server) progress(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(p); err != nil {
 		log.Error(err, "Failed to write the progress")
 	}
+}
+
+// bootChecked returns true when the current leader found no power cycle since the record.
+// After a power-on, a Complete request from before the power cycle has the marker of an old leader.
+func (s *Server) bootChecked(ctx context.Context, status shutdownv1alpha1.ShutdownRequestStatus) bool {
+	// A request with no marker has no check.
+	if status.BootCheckedBy == "" {
+		return false
+	}
+	leader, err := s.LeaderIdentity(ctx)
+	// A failed read shows the request as not complete, so that the caller waits.
+	if err != nil {
+		log.Error(err, "Failed to read the leader identity, shows the request as not complete")
+		return false
+	}
+	return leader == status.BootCheckedBy
 }

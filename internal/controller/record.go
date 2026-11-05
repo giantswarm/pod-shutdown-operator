@@ -31,6 +31,11 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 	if err != nil {
 		return err
 	}
+	// The record holds the current boot IDs, so this process knows that no power cycle came after it.
+	identity, err := r.leaderIdentity(ctx)
+	if err != nil {
+		return err
+	}
 	record, err := r.planner().recordState(ctx)
 	if err != nil {
 		return err
@@ -49,6 +54,7 @@ func (r *ShutdownRequestReconciler) startShutdown(ctx context.Context, request *
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     record,
 		BootIDs:           bootIDs,
+		BootCheckedBy:     identity,
 		Unmanaged:         unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             int32(len(record.Applications)), //nolint:gosec // The number of applications is small.
@@ -70,6 +76,10 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 	if err != nil {
 		return err
 	}
+	identity, err := r.leaderIdentity(ctx)
+	if err != nil {
+		return err
+	}
 	now := metav1.Now()
 	updated := request.DeepCopy()
 	// The new status keeps the fields from the start of the first shutdown. The new start time gives the whole budget again.
@@ -77,6 +87,7 @@ func (r *ShutdownRequestReconciler) reuseRecord(ctx context.Context, request *sh
 		Phase:             shutdownv1alpha1.PhaseShuttingDown,
 		RecordedState:     request.Status.RecordedState,
 		BootIDs:           bootIDs,
+		BootCheckedBy:     identity,
 		Unmanaged:         request.Status.Unmanaged,
 		ShutdownStartedAt: &now,
 		Total:             request.Status.Total,
