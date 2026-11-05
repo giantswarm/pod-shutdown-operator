@@ -21,7 +21,11 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-const testNode = "node-a"
+const (
+	testNode   = "node-a"
+	testLeader = "pod-a_1"
+	testBootID = "boot-a"
+)
 
 var errTest = errors.New("the API server is not available")
 
@@ -49,7 +53,7 @@ func newBootTestReconciler(t *testing.T, request *shutdownv1alpha1.ShutdownReque
 	})
 
 	bootIDFile := filepath.Join(t.TempDir(), "boot_id")
-	if err := os.WriteFile(bootIDFile, []byte("boot-a\n"), 0o600); err != nil {
+	if err := os.WriteFile(bootIDFile, []byte(testBootID+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	r := &ShutdownRequestReconciler{
@@ -59,8 +63,76 @@ func newBootTestReconciler(t *testing.T, request *shutdownv1alpha1.ShutdownReque
 		NodeName:   testNode,
 		StaleLimit: time.Minute,
 		Clock:      clocktesting.NewFakePassiveClock(time.Now()),
+		LeaderIdentity: func(context.Context) (string, error) {
+			return testLeader, nil
+		},
 	}
 	return r, c
+}
+
+func TestTheBootCheckMarkerIsWrittenOnlyWhenNoPowerCycleHappened(t *testing.T) {
+	tests := map[string]struct {
+		phase   shutdownv1alpha1.Phase
+		bootIDs map[string]string
+		step    func(*ShutdownRequestReconciler, context.Context, *shutdownv1alpha1.ShutdownRequest) error
+		want    string
+	}{
+		"checkBoot with an equal boot ID": {
+			phase: shutdownv1alpha1.PhaseComplete, bootIDs: map[string]string{testNode: testBootID},
+			step: (*ShutdownRequestReconciler).checkBoot, want: testLeader,
+		},
+		"checkBoot after a power cycle": {
+			phase: shutdownv1alpha1.PhaseComplete, bootIDs: map[string]string{testNode: "boot-old"},
+			step: (*ShutdownRequestReconciler).checkBoot, want: "old-leader",
+		},
+		"startShutdown": {phase: "", step: (*ShutdownRequestReconciler).startShutdown, want: testLeader},
+		"reuseRecord":   {phase: shutdownv1alpha1.PhaseScalingUp, step: (*ShutdownRequestReconciler).reuseRecord, want: testLeader},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := &shutdownv1alpha1.ShutdownRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+				Spec:       shutdownv1alpha1.ShutdownRequestSpec{Action: shutdownv1alpha1.ActionShutdown},
+				Status: shutdownv1alpha1.ShutdownRequestStatus{
+					Phase:         tt.phase,
+					RecordedState: &shutdownv1alpha1.RecordedState{},
+					BootIDs:       tt.bootIDs,
+					BootCheckedBy: "old-leader",
+				},
+			}
+			r, c := newBootTestReconciler(t, request, false, interceptor.Funcs{})
+			current := getTestRequest(t, c)
+
+			if err := tt.step(r, context.Background(), &current); err != nil {
+				t.Fatalf("step: %v", err)
+			}
+			if got := getTestRequest(t, c).Status.BootCheckedBy; got != tt.want {
+				t.Errorf("bootCheckedBy: got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A failed read of the leader identity must not give a marker. The step tries again at the retry.
+func TestTheBootCheckReturnsTheLeaderIdentityError(t *testing.T) {
+	request := &shutdownv1alpha1.ShutdownRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+		Spec:       shutdownv1alpha1.ShutdownRequestSpec{Action: shutdownv1alpha1.ActionShutdown},
+		Status: shutdownv1alpha1.ShutdownRequestStatus{
+			Phase:   shutdownv1alpha1.PhaseComplete,
+			BootIDs: map[string]string{testNode: testBootID},
+		},
+	}
+	r, c := newBootTestReconciler(t, request, false, interceptor.Funcs{})
+	r.LeaderIdentity = func(context.Context) (string, error) { return "", errTest }
+	current := getTestRequest(t, c)
+
+	if err := r.checkBoot(context.Background(), &current); !errors.Is(err, errTest) {
+		t.Fatalf("got %v, want the leader identity error", err)
+	}
+	if got := getTestRequest(t, c).Status.BootCheckedBy; got != "" {
+		t.Errorf("bootCheckedBy: got %q, want none", got)
+	}
 }
 
 func getTestRequest(t *testing.T, c client.Client) shutdownv1alpha1.ShutdownRequest {
@@ -121,7 +193,7 @@ func TestCheckBootRecordsTheOwnBootIDWhenTheNodeListFails(t *testing.T) {
 	if got.Spec.Action != shutdownv1alpha1.ActionCancel {
 		t.Errorf("action: got %q, want %q", got.Spec.Action, shutdownv1alpha1.ActionCancel)
 	}
-	if bootID := got.Status.BootIDs[testNode]; bootID != "boot-a" {
+	if bootID := got.Status.BootIDs[testNode]; bootID != testBootID {
 		t.Errorf("own boot ID: got %q, want boot-a", bootID)
 	}
 }

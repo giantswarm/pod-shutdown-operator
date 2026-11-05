@@ -349,16 +349,25 @@ var _ = Describe("The HTTP endpoint", func() {
 				Expect(progressInPhase(url, shutdownv1alpha1.PhaseComplete)).To(HaveKeyWithValue("budgetRemainingSeconds", float64(0)))
 			})
 
-			DescribeTable("shows complete as true only in the phase Complete",
-				func(phase shutdownv1alpha1.Phase, complete bool) {
-					createRequestInPhase(shutdownv1alpha1.ActionShutdown, phase)
+			// The standby Lease holder is other-pod. A marker of other-pod tells that the current leader checked the boot ID.
+			DescribeTable("shows complete as true only in the phase Complete, after the boot ID check of the current leader",
+				func(phase shutdownv1alpha1.Phase, bootCheckedBy string, complete bool) {
+					// One update writes the phase and the marker, so that the cache never shows the phase with no marker.
+					createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+					request := getRequest()
+					request.Status.Phase = phase
+					request.Status.BootCheckedBy = bootCheckedBy
+					Expect(k8sClient.Status().Update(ctx, request)).To(Succeed())
 					Expect(progressInPhase(url, phase)).To(HaveKeyWithValue("complete", complete))
+					Consistently(func() any { return progressOf(url)["complete"] }, time.Second).Should(Equal(complete))
 				},
-				Entry("with no phase", shutdownv1alpha1.Phase(""), false),
-				Entry("in ShuttingDown", shutdownv1alpha1.PhaseShuttingDown, false),
-				Entry("in Complete", shutdownv1alpha1.PhaseComplete, true),
-				Entry("in ScalingUp", shutdownv1alpha1.PhaseScalingUp, false),
-				Entry("in Restored", shutdownv1alpha1.PhaseRestored, false),
+				Entry("with no phase", shutdownv1alpha1.Phase(""), "other-pod", false),
+				Entry("in ShuttingDown", shutdownv1alpha1.PhaseShuttingDown, "other-pod", false),
+				Entry("in Complete after the check of the current leader", shutdownv1alpha1.PhaseComplete, "other-pod", true),
+				Entry("in Complete before the check of the current leader", shutdownv1alpha1.PhaseComplete, "old-pod", false),
+				Entry("in Complete with no check", shutdownv1alpha1.PhaseComplete, "", false),
+				Entry("in ScalingUp", shutdownv1alpha1.PhaseScalingUp, "other-pod", false),
+				Entry("in Restored", shutdownv1alpha1.PhaseRestored, "other-pod", false),
 			)
 
 			DescribeTable("shows no budget remainder outside ShuttingDown and Complete",

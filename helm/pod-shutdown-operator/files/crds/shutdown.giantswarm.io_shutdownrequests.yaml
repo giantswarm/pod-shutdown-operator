@@ -76,6 +76,11 @@ spec:
             description: ShutdownRequestStatus is the state of the shutdown event.
               Only the leader writes it.
             properties:
+              bootCheckedBy:
+                description: |-
+                  BootCheckedBy is the leader election identity of the operator process that found no power cycle since the record.
+                  GET /progress shows complete only when it is the identity of the current leader.
+                type: string
               bootIDs:
                 additionalProperties:
                   type: string

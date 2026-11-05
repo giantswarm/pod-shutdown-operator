@@ -1,11 +1,16 @@
 package operator
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
@@ -16,6 +21,9 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/api"
 	"github.com/giantswarm/pod-shutdown-operator/internal/controller"
 )
+
+// inClusterNamespacePath holds the namespace of the pod. controller-runtime reads the same file.
+const inClusterNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 // Config holds the settings of the operator.
 type Config struct {
@@ -74,11 +82,20 @@ type Config struct {
 func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 	opts := c.Manager
 	opts.Scheme = NewScheme()
+	// The Lease namespace is set here, so that the manager and the leader identity use the same Lease.
+	if opts.LeaderElection && opts.LeaderElectionNamespace == "" {
+		namespace, err := podNamespace()
+		if err != nil {
+			return nil, err
+		}
+		opts.LeaderElectionNamespace = namespace
+	}
 
 	mgr, err := ctrl.NewManager(restConfig, opts)
 	if err != nil {
 		return nil, fmt.Errorf("create manager: %w", err)
 	}
+	identity := leaderIdentity(mgr.GetAPIReader(), opts)
 
 	vmActions := c.VirtualMachineActions
 	if vmActions == nil {
@@ -102,6 +119,7 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		NodeName:                c.NodeName,
 		StaleLimit:              c.StaleLimit,
 		Clock:                   c.Clock,
+		LeaderIdentity:          identity,
 	}
 	if err := reconciler.SetupWithManager(mgr); err != nil {
 		return nil, fmt.Errorf("set up ShutdownRequest controller: %w", err)
@@ -122,11 +140,12 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 
 	if c.APIBindAddress != "" {
 		server := &api.Server{
-			Client:     client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
-			Reader:     mgr.GetAPIReader(),
-			TokenFile:  c.APITokenFile,
-			StaleLimit: c.StaleLimit,
-			Clock:      c.Clock,
+			Client:         client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+			Reader:         mgr.GetAPIReader(),
+			TokenFile:      c.APITokenFile,
+			StaleLimit:     c.StaleLimit,
+			Clock:          c.Clock,
+			LeaderIdentity: identity,
 		}
 		if err := mgr.Add(&manager.Server{
 			Name: "api",
@@ -146,4 +165,33 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 		}
 	}
 	return mgr, nil
+}
+
+// podNamespace returns the namespace of the operator pod from the service account file, as controller-runtime does.
+func podNamespace() (string, error) {
+	data, err := os.ReadFile(inClusterNamespacePath)
+	if err != nil {
+		return "", fmt.Errorf("read the pod namespace for the leader election, or set the leader election namespace: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// leaderIdentity returns a function that gives the leader election identity of the current leader.
+// With leader election, it reads the holder of the Lease from the API server at each call. The Role of the chart
+// gives only get on the Lease, and a cache needs list and watch.
+// With no leader election, each process acts as the leader, so the identity is a new ID of this process.
+// Then only the process that ran the check shows complete.
+func leaderIdentity(reader client.Reader, opts ctrl.Options) func(context.Context) (string, error) {
+	if !opts.LeaderElection {
+		self := string(uuid.NewUUID())
+		return func(context.Context) (string, error) { return self, nil }
+	}
+	key := client.ObjectKey{Namespace: opts.LeaderElectionNamespace, Name: opts.LeaderElectionID}
+	return func(ctx context.Context) (string, error) {
+		var lease coordinationv1.Lease
+		if err := reader.Get(ctx, key, &lease); err != nil {
+			return "", fmt.Errorf("get the leader election Lease %s: %w", key, err)
+		}
+		return ptr.Deref(lease.Spec.HolderIdentity, ""), nil
+	}
 }

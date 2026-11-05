@@ -144,6 +144,11 @@ type ShutdownRequestStatus struct {
 	// +optional
 	BootIDs map[string]string `json:"bootIDs,omitempty"`
 
+	// BootCheckedBy is the leader election identity of the operator process that found no power cycle since the record.
+	// GET /progress shows complete only when it is the identity of the current leader.
+	// +optional
+	BootCheckedBy string `json:"bootCheckedBy,omitempty"`
+
 	// +optional
 	// +listType=atomic
 	Unmanaged []UnmanagedWorkload `json:"unmanaged,omitempty"`

@@ -68,7 +68,7 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	recorded := request.Status.BootIDs[r.NodeName]
 	// An equal boot ID means an operator restart.
 	if err == nil && bootID == recorded {
-		return nil
+		return r.markBootChecked(ctx, request)
 	}
 	// A missing own entry also counts as a power cycle, on purpose. The node joined after the record,
 	// or had an empty boot ID at record time. The operator cannot tell this from a power cycle,
@@ -101,4 +101,42 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	}
 	*request = *updated
 	return nil
+}
+
+// markBootChecked writes the identity of this process to status.bootCheckedBy.
+// GET /progress then shows a Complete request as complete.
+func (r *ShutdownRequestReconciler) markBootChecked(ctx context.Context, request *shutdownv1alpha1.ShutdownRequest) error {
+	identity, err := r.leaderIdentity(ctx)
+	if err != nil {
+		return err
+	}
+	// A repeat check writes nothing.
+	if request.Status.BootCheckedBy == identity {
+		return nil
+	}
+	updated := request.DeepCopy()
+	updated.Status.BootCheckedBy = identity
+	if err := r.Client.Status().Update(ctx, updated); err != nil {
+		return fmt.Errorf("mark the boot ID check: %w", err)
+	}
+	*request = *updated
+	return nil
+}
+
+// leaderIdentity returns the leader election identity of this process. It reads the identity once.
+// The identity does not change while the process runs.
+func (r *ShutdownRequestReconciler) leaderIdentity(ctx context.Context) (string, error) {
+	if r.identity != "" {
+		return r.identity, nil
+	}
+	identity, err := r.LeaderIdentity(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read the leader identity: %w", err)
+	}
+	// An empty identity matches no marker, so the endpoint could never show complete.
+	if identity == "" {
+		return "", errors.New("the leader identity is empty")
+	}
+	r.identity = identity
+	return identity, nil
 }

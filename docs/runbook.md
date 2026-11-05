@@ -24,6 +24,8 @@ Read the progress. This call needs no token:
 
     curl http://<node-address>:30082/progress
 
+The field `complete` is true only in the phase `Complete`, and only after the current leader has checked that no power cycle happened since the shutdown. After an operator start or a leader change, `complete` is false until the new leader has done this check. The leader writes its identity to `status.bootCheckedBy` when the check finds no power cycle. `complete` is true when this identity is equal to the holder of the leader election Lease. With leader election off, only the pod that did the check shows `complete` as true.
+
 The endpoint uses plain HTTP, so the token goes over the network in clear text. Keep the node addresses in a trusted network.
 
 ## Read the state of the last shutdown

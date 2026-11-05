@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +22,10 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-const token = "test-token"
+const (
+	token   = "test-token"
+	leaderA = "pod-a_1"
+)
 
 // newServer returns a server on a fake client that holds the request. The interceptor runs on each write.
 func newServer(t *testing.T, request *shutdownv1alpha1.ShutdownRequest, funcs interceptor.Funcs) (*Server, client.Client) {
@@ -195,4 +200,47 @@ func TestShutdownDoesNotReplaceAnOldRequestThatTheLeaderStarted(t *testing.T) {
 	request := getRequest(t, c)
 	g.Expect(request.UID).To(BeEquivalentTo("old"))
 	g.Expect(request.Status.Phase).To(Equal(shutdownv1alpha1.PhaseShuttingDown))
+}
+
+// progressOf calls GET /progress and returns the response.
+func progressOf(t *testing.T, s *Server) Progress {
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/progress", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", rec.Code, http.StatusOK)
+	}
+	var p Progress
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A Complete request shows complete only when the marker is the identity of the current leader.
+// A failed read of the leader identity shows it as not complete, so that the caller waits.
+func TestProgressShowsCompleteOnlyAfterTheCheckOfTheCurrentLeader(t *testing.T) {
+	tests := map[string]struct {
+		bootCheckedBy string
+		leader        string
+		leaderErr     error
+		want          bool
+	}{
+		"the current leader checked":     {bootCheckedBy: leaderA, leader: leaderA, want: true},
+		"an old leader checked":          {bootCheckedBy: leaderA, leader: "pod-b_2", want: false},
+		"no leader checked":              {bootCheckedBy: "", leader: leaderA, want: false},
+		"the Lease has no holder":        {bootCheckedBy: leaderA, leader: "", want: false},
+		"the leader identity read fails": {bootCheckedBy: leaderA, leaderErr: errors.New("the API server is not available"), want: false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := newRequest(shutdownv1alpha1.ActionShutdown, shutdownv1alpha1.PhaseComplete)
+			request.Status.BootCheckedBy = tt.bootCheckedBy
+			s, _ := newServer(t, request, interceptor.Funcs{})
+			s.LeaderIdentity = func(context.Context) (string, error) { return tt.leader, tt.leaderErr }
+
+			if got := progressOf(t, s).Complete; got != tt.want {
+				t.Errorf("complete: got %t, want %t", got, tt.want)
+			}
+		})
+	}
 }

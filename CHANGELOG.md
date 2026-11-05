@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: replace an old request with no phase on POST /shutdown, so that the stale rule does not drop the call
 - fix: do not halt a RerunOnFailure VM whose VMI is already in deletion
 - fix: read the VM terminationGracePeriodSeconds from the running VMI
+- fix: show complete in GET /progress only after the boot ID check of the current leader
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
