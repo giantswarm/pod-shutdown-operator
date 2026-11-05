@@ -23,5 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: confirm a cached 0 before a stop, and do not block the scale-up on one failed start
 - fix: return the Node list error at record time, and keep the stale check until a request passes it
 
+### Fixed
+
+- fix: try each Flux controller and requeue at the poll interval after a failed Flux start
+
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
