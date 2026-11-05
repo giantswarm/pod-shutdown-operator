@@ -17,11 +17,11 @@ import (
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
 )
 
-// createGuardedDeployment creates a Deployment with the replicas and a policy that makes the API server
-// reject a scale to 0 of it. It waits until the API server applies the policy.
-func createGuardedDeployment(ns, deployment string, replicas int32) client.Object {
+// rejectUpdates makes the API server reject each update of a resource in the namespace
+// when the CEL expression is false for the new object.
+func rejectUpdates(ns, apiGroup, resource, expression, message string) {
 	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-scale-to-zero-"},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-update-"},
 		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
 			FailurePolicy: ptr.To(admissionregistrationv1.Fail),
 			MatchConstraints: &admissionregistrationv1.MatchResources{
@@ -29,16 +29,16 @@ func createGuardedDeployment(ns, deployment string, replicas int32) client.Objec
 					RuleWithOperations: admissionregistrationv1.RuleWithOperations{
 						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
 						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"apps"},
+							APIGroups:   []string{apiGroup},
 							APIVersions: []string{"v1"},
-							Resources:   []string{"deployments"},
+							Resources:   []string{resource},
 						},
 					},
 				}},
 			},
 			Validations: []admissionregistrationv1.Validation{{
-				Expression: `object.metadata.name != "` + deployment + `" || object.spec.replicas != 0`,
-				Message:    "scale to 0 is not allowed",
+				Expression: expression,
+				Message:    message,
 			}},
 		},
 	}
@@ -46,7 +46,7 @@ func createGuardedDeployment(ns, deployment string, replicas int32) client.Objec
 	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
 
 	binding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-scale-to-zero-"},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-update-"},
 		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
 			PolicyName:        policy.Name,
 			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
@@ -57,12 +57,24 @@ func createGuardedDeployment(ns, deployment string, replicas int32) client.Objec
 	}
 	Expect(k8sClient.Create(ctx, binding)).To(Succeed())
 	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, binding)).To(Succeed()) })
+}
 
+// waitForRejection waits until the API server applies a policy of rejectUpdates to the object.
+// The dry run of the patch then fails with the message of the policy.
+func waitForRejection(obj client.Object, patch client.Patch, message string) {
+	Eventually(func() error {
+		return k8sClient.Patch(ctx, obj, patch, client.DryRunAll)
+	}).Should(MatchError(ContainSubstring(message)))
+}
+
+// createGuardedDeployment creates a Deployment with the replicas and a policy that makes the API server
+// reject a scale to 0 of it. It waits until the API server applies the policy.
+func createGuardedDeployment(ns, deployment string, replicas int32) client.Object {
+	rejectUpdates(ns, "apps", "deployments",
+		`object.metadata.name != "`+deployment+`" || object.spec.replicas != 0`, "scale to 0 is not allowed")
 	d := createDeployment(ns, deployment, replicas)
 	scaleToZero := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`))
-	Eventually(func() error {
-		return k8sClient.Patch(ctx, d, scaleToZero, client.DryRunAll)
-	}).Should(MatchError(ContainSubstring("scale to 0 is not allowed")))
+	waitForRejection(d, scaleToZero, "scale to 0 is not allowed")
 	return d
 }
 
