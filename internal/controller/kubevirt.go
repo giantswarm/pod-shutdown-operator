@@ -171,7 +171,8 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 	if vmi == nil && !usesRunning && !strategyTellsState(strategy) {
 		return true, nil
 	}
-	if !halted {
+	// A RerunOnFailure VM that a user stops keeps its field. The shutdown still waits for its VMI to end.
+	if !halted && !stoppedByUser(strategy, vmi) {
 		err := retryOnce(func() error { return r.Client.Patch(ctx, vm, haltPatch(usesRunning)) })
 		if isAbsent(err) {
 			return true, nil
@@ -211,6 +212,13 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 	}
 	ctrl.LoggerFrom(ctx).Info("Forced stop: stopped a VM with a grace period of 0", "vm", appKey(namespace, name))
 	return false, nil
+}
+
+// stoppedByUser returns true when the VMI of a RerunOnFailure VM is in deletion, for example after a stop by a user.
+// KubeVirt starts a RerunOnFailure VM when the status run strategy differs from the spec,
+// so a halt and a restore would start a VM that was off. A Once VM is Halted after a stop by a user.
+func stoppedByUser(strategy string, vmi *unstructured.Unstructured) bool {
+	return strategy == runStrategyRerunOnFailure && vmi != nil && vmi.GetDeletionTimestamp() != nil
 }
 
 // haltState returns the run strategy of a VM, true when the field that the VM uses halts it,

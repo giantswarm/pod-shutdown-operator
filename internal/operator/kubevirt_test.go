@@ -259,6 +259,31 @@ var _ = Describe("KubeVirt VirtualMachines", func() {
 		Expect(actions.callsOf()).To(BeEmpty())
 	})
 
+	It("does not halt a RerunOnFailure VM whose VMI is in deletion, and waits for the VMI to end", func() {
+		// A stop by a user just before the shutdown deletes the VMI.
+		createVM(ns, "rerun", map[string]any{"runStrategy": "RerunOnFailure"})
+		createVMI(ns, "rerun")
+		terminateVMI(ns, "rerun")
+		createApplication(ns, "vms", vmWorkload("rerun"))
+
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseShuttingDown))
+		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseShuttingDown))
+		Expect(vmSpecOf(ns, "rerun")()).To(Equal(map[string]any{"runStrategy": "RerunOnFailure"}))
+
+		finishVMI(ns, "rerun")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+
+		// KubeVirt starts a RerunOnFailure VM when its status run strategy differs from the spec.
+		// A restore that changes no field thus keeps the VM off.
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(vmSpecOf(ns, "rerun")()).To(Equal(map[string]any{"runStrategy": "RerunOnFailure"}))
+		Expect(actions.callsOf()).To(BeEmpty())
+	})
+
 	It("fails the application when the forced stop fails", func() {
 		actions.setStopErr(apierrors.NewInternalError(errors.New("virt-api is down")))
 		createVM(ns, "vm", map[string]any{"runStrategy": "Always"})
