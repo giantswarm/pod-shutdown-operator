@@ -244,8 +244,17 @@ func haltPatch(usesRunning bool) client.Patch {
 
 // forceStopped returns true when the VMI has a grace period of 0.
 func forceStopped(vmi *unstructured.Unstructured) bool {
-	gracePeriod, found, _ := unstructured.NestedInt64(vmi.Object, "spec", "terminationGracePeriodSeconds")
+	gracePeriod, found := vmiGracePeriod(vmi)
 	return found && gracePeriod == 0
+}
+
+// vmiGracePeriod returns the terminationGracePeriodSeconds of a VMI. It returns false for a nil VMI or no value.
+func vmiGracePeriod(vmi *unstructured.Unstructured) (int64, bool) {
+	if vmi == nil {
+		return 0, false
+	}
+	gracePeriod, found, _ := unstructured.NestedInt64(vmi.Object, "spec", "terminationGracePeriodSeconds")
+	return gracePeriod, found
 }
 
 // startVM sets the field of a VM to its recorded value. It returns true when the VM is ready, or when it

@@ -176,7 +176,7 @@ func (p planner) terminationFindings(ctx context.Context, apps []shutdownv1alpha
 			if !recordedRunning(w) {
 				continue
 			}
-			termination, found, err := p.terminationGracePeriod(ctx, app.Namespace, w)
+			termination, note, found, err := p.terminationGracePeriod(ctx, app.Namespace, w)
 			if err != nil {
 				return nil, err
 			}
@@ -187,14 +187,14 @@ func (p planner) terminationFindings(ctx context.Context, apps []shutdownv1alpha
 				Severity:     shutdownv1alpha1.SeverityWarning,
 				Reason:       shutdownv1alpha1.ReasonTerminationGracePeriodLonger,
 				Applications: []string{key},
-				Message: fmt.Sprintf("The terminationGracePeriodSeconds of %s %s is %s, which is longer than the gracePeriod %s.",
-					w.Kind, w.Name, termination, gracePeriod),
+				Message: fmt.Sprintf("The terminationGracePeriodSeconds of %s %s is %s, which is longer than the gracePeriod %s.%s",
+					w.Kind, w.Name, termination, gracePeriod, note),
 				Fallback: "Force the stop at the end of the gracePeriod or at the deadline, with a grace period of 0.",
 			}
 			if termination < gracePeriod {
 				finding.Reason = shutdownv1alpha1.ReasonTerminationGracePeriodShorter
-				finding.Message = fmt.Sprintf("The terminationGracePeriodSeconds of %s %s is %s, which is shorter than the gracePeriod %s.",
-					w.Kind, w.Name, termination, gracePeriod)
+				finding.Message = fmt.Sprintf("The terminationGracePeriodSeconds of %s %s is %s, which is shorter than the gracePeriod %s.%s",
+					w.Kind, w.Name, termination, gracePeriod, note)
 				finding.Fallback = "None. The workload gets only its terminationGracePeriodSeconds to stop."
 			}
 			findings = append(findings, finding)
@@ -204,42 +204,56 @@ func (p planner) terminationFindings(ctx context.Context, apps []shutdownv1alpha
 }
 
 // terminationGracePeriod returns the terminationGracePeriodSeconds of the pod template of a Deployment or a
-// StatefulSet, or of a VM. It returns false for a CronJob and for a workload that does not exist.
-func (p planner) terminationGracePeriod(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (time.Duration, bool, error) {
+// StatefulSet, or of a VM, and a note for the message. It returns false for a CronJob and for a workload that does not exist.
+func (p planner) terminationGracePeriod(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload) (time.Duration, string, bool, error) {
 	// The API server sets this default in a pod template. KubeVirt sets no default, but uses the same value.
 	seconds := int64(corev1.DefaultTerminationGracePeriodSeconds)
+	var note string
 	switch w.Kind {
 	case shutdownv1alpha1.WorkloadKindCronJob:
 		// A suspend does not stop the pods of a CronJob.
-		return 0, false, nil
+		return 0, "", false, nil
 	case shutdownv1alpha1.WorkloadKindVirtualMachine:
 		vm := newKubeVirtObject(string(w.Kind), namespace, w.Name)
 		err := p.reader.Get(ctx, client.ObjectKeyFromObject(vm), vm)
 		if isAbsent(err) {
-			return 0, false, nil
+			return 0, "", false, nil
 		}
 		if err != nil {
-			return 0, false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+			return 0, "", false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+		}
+		vmi, err := p.runningVMI(ctx, namespace, w.Name)
+		if err != nil {
+			return 0, "", false, err
 		}
 		// The check uses the VM value. The virt-launcher pod value is 30 seconds longer.
-		if value, found, _ := unstructured.NestedInt64(vm.Object, "spec", "template", "spec", "terminationGracePeriodSeconds"); found {
+		// KubeVirt copies the value into the VMI at the start, also from a VirtualMachinePreference,
+		// so the VMI value is the one that a stop uses.
+		value, found := vmiGracePeriod(vmi)
+		if vmi == nil {
+			// With no VMI, the VM template gives the value, but a preference can change it at the start.
+			value, found, _ = unstructured.NestedInt64(vm.Object, "spec", "template", "spec", "terminationGracePeriodSeconds")
+			note = " The VM does not run, so the value comes from the VM template. " +
+				"The preferredTerminationGracePeriodSeconds of a VirtualMachinePreference can set a different value."
+		}
+		if found {
 			seconds = value
 		}
 	default:
 		obj, ok := newScalable(w.Kind)
 		if !ok {
-			return 0, false, nil
+			return 0, "", false, nil
 		}
 		err := p.reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: w.Name}, obj)
 		if isAbsent(err) {
-			return 0, false, nil
+			return 0, "", false, nil
 		}
 		if err != nil {
-			return 0, false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+			return 0, "", false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
 		}
 		seconds = ptr.Deref(podTemplate(obj).Spec.TerminationGracePeriodSeconds, seconds)
 	}
-	return time.Duration(seconds) * time.Second, true, nil
+	return time.Duration(seconds) * time.Second, note, true, nil
 }
 
 // recordedRunning returns true when the record tells that a workload runs: a Deployment or a StatefulSet with

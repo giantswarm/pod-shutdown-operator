@@ -88,6 +88,13 @@ func guardVMs(ns string) {
 	}).Should(MatchError(ContainSubstring("halt is not allowed")))
 }
 
+// createVMIWithGracePeriod creates the VMI of a running VM with a terminationGracePeriodSeconds, in the place of KubeVirt.
+func createVMIWithGracePeriod(ns, name string, seconds int64) {
+	vmi := newVMI(ns, name)
+	vmi.Object["spec"] = map[string]any{"terminationGracePeriodSeconds": seconds}
+	Expect(k8sClient.Create(ctx, vmi)).To(Succeed())
+}
+
 // applicationsIn returns the applications of the findings.
 func applicationsIn(findings []shutdownv1alpha1.Finding) []string {
 	var apps []string
@@ -255,6 +262,14 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		// An unset VM value counts as 30 seconds.
 		createVM(ns, "windows-vm", map[string]any{"runStrategy": "Always"})
 		createVM(ns, "linux-vm", map[string]any{"runStrategy": "Always"})
+		// The VMI value wins over the VM template, for example from a VirtualMachinePreference or before a restart.
+		createVM(ns, "preferred-vm", map[string]any{"runStrategy": "Always"})
+		createVMIWithGracePeriod(ns, "preferred-vm", 120)
+		createVM(ns, "changed-vm", map[string]any{
+			"runStrategy": "Always",
+			"template":    map[string]any{"spec": map[string]any{"terminationGracePeriodSeconds": int64(120)}},
+		})
+		createVMIWithGracePeriod(ns, "changed-vm", 30)
 		// A real shutdown stops no pod of a workload that does not run, so these give no finding.
 		setTerminationGracePeriod(createDeployment(ns, "idle", 0), 60)
 		createVM(ns, "halted-vm", map[string]any{
@@ -269,6 +284,8 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		createApplication(ns, "slow", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "slow-vm"))
 		createApplication(ns, "windows", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "windows-vm"))
 		createApplication(ns, "linux", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "linux-vm"))
+		createApplication(ns, "preferred", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "preferred-vm"))
+		createApplication(ns, "changed", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "changed-vm"))
 		setGracePeriod(ns, "windows", time.Minute)
 
 		status := createPlan()
@@ -279,8 +296,16 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 			HaveField("Severity", shutdownv1alpha1.SeverityWarning),
 			HaveField("Fallback", ContainSubstring("grace period of 0")),
 		)))
-		Expect(applicationsIn(longer)).To(ConsistOf(ns+"/frontend", ns+"/slow"))
-		Expect(longer).To(ContainElement(HaveField("Message", ContainSubstring("VirtualMachine slow-vm is 2m0s"))))
+		Expect(applicationsIn(longer)).To(ConsistOf(ns+"/frontend", ns+"/slow", ns+"/preferred"))
+		// With no VMI, the value comes from the VM template, and a preference can change it.
+		Expect(longer).To(ContainElement(HaveField("Message", SatisfyAll(
+			ContainSubstring("VirtualMachine slow-vm is 2m0s"),
+			ContainSubstring("preferredTerminationGracePeriodSeconds"),
+		))))
+		Expect(longer).To(ContainElement(HaveField("Message", SatisfyAll(
+			ContainSubstring("VirtualMachine preferred-vm is 2m0s"),
+			Not(ContainSubstring("preferredTerminationGracePeriodSeconds")),
+		))))
 
 		shorter := findingsWith(status, shutdownv1alpha1.ReasonTerminationGracePeriodShorter)
 		Expect(shorter).To(HaveEach(HaveField("Severity", shutdownv1alpha1.SeverityWarning)))
