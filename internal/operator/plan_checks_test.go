@@ -9,12 +9,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
@@ -39,53 +36,16 @@ func setTerminationGracePeriod(obj client.Object, seconds int64) {
 	Expect(k8sClient.Patch(ctx, obj, patch)).To(Succeed())
 }
 
-// guardVMs makes the API server reject a halt of each VM in the namespace.
+// guardVMs makes the API server reject a halt of each VM in the namespace with the runStrategy field.
+// It does not reject a halt with the running field.
 func guardVMs(ns string) {
-	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-vm-halt-"},
-		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
-			FailurePolicy: ptr.To(admissionregistrationv1.Fail),
-			MatchConstraints: &admissionregistrationv1.MatchResources{
-				ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{{
-					RuleWithOperations: admissionregistrationv1.RuleWithOperations{
-						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
-						Rule: admissionregistrationv1.Rule{
-							APIGroups:   []string{"kubevirt.io"},
-							APIVersions: []string{"v1"},
-							Resources:   []string{"virtualmachines"},
-						},
-					},
-				}},
-			},
-			Validations: []admissionregistrationv1.Validation{{
-				Expression: `!has(object.spec.runStrategy) || object.spec.runStrategy != "Halted"`,
-				Message:    "halt is not allowed",
-			}},
-		},
-	}
-	Expect(k8sClient.Create(ctx, policy)).To(Succeed())
-	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+	rejectUpdates(ns, "kubevirt.io", "virtualmachines",
+		`!has(object.spec.runStrategy) || object.spec.runStrategy != "Halted"`, "halt is not allowed")
 
-	binding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
-		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-vm-halt-"},
-		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
-			PolicyName:        policy.Name,
-			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
-			MatchResources: &admissionregistrationv1.MatchResources{
-				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
-			},
-		},
-	}
-	Expect(k8sClient.Create(ctx, binding)).To(Succeed())
-	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, binding)).To(Succeed()) })
-
-	// Wait until the API server applies the policy. No application lists the probe VM.
+	// No application lists the probe VM.
 	createVM(ns, "guard-probe", map[string]any{"runStrategy": "Always"})
 	probe := newKubeVirtObject("VirtualMachine", ns, "guard-probe")
-	halt := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"runStrategy":"Halted"}}`))
-	Eventually(func() error {
-		return k8sClient.Patch(ctx, probe, halt, client.DryRunAll)
-	}).Should(MatchError(ContainSubstring("halt is not allowed")))
+	waitForRejection(probe, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"runStrategy":"Halted"}}`)), "halt is not allowed")
 }
 
 // createVMIWithGracePeriod creates the VMI of a running VM with a terminationGracePeriodSeconds, in the place of KubeVirt.
@@ -153,6 +113,49 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		Expect(status.Report).To(ContainSubstring(fluxNS + "/kustomize-controller"))
 		Expect(replicasOf(guarded)()).To(Equal(int32(3)))
 		Expect(replicasOf(kustomize)()).To(Equal(int32(3)))
+	})
+
+	It("reports a rejected dry run for the patch of a StatefulSet, a CronJob, and a VM with the running field", func() {
+		stop, _ = startOperator(operator.Config{})
+		// Each policy rejects only the patch that a real shutdown sends, so a wrong patch gives no finding.
+		db := createStatefulSet(ns, "db", 1)
+		rejectUpdates(ns, "apps", "statefulsets", "object.spec.replicas != 0", "scale to 0 is not allowed")
+		waitForRejection(db, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"replicas":0}}`)), "scale to 0 is not allowed")
+		report := createCronJob(ns, "report", false)
+		rejectUpdates(ns, "batch", "cronjobs", "!has(object.spec.suspend) || !object.spec.suspend", "suspend is not allowed")
+		waitForRejection(report, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"suspend":true}}`)), "suspend is not allowed")
+		createVM(ns, "legacy-vm", map[string]any{"running": true})
+		legacy := newKubeVirtObject("VirtualMachine", ns, "legacy-vm")
+		rejectUpdates(ns, "kubevirt.io", "virtualmachines", "!has(object.spec.running) || object.spec.running", "halt is not allowed")
+		waitForRejection(legacy, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"running":false}}`)), "halt is not allowed")
+		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindStatefulSet, "db"))
+		createApplication(ns, "reports", workload(shutdownv1alpha1.WorkloadKindCronJob, "report"))
+		createApplication(ns, "legacy", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "legacy-vm"))
+
+		status := createPlan()
+
+		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultErrors))
+		rejected := findingsWith(status, shutdownv1alpha1.ReasonPatchRejected)
+		Expect(rejected).To(HaveEach(HaveField("Severity", shutdownv1alpha1.SeverityError)))
+		Expect(rejected).To(ConsistOf(
+			SatisfyAll(
+				HaveField("Applications", ConsistOf(ns+"/database")),
+				HaveField("Message", ContainSubstring("scale to 0 is not allowed")),
+			),
+			SatisfyAll(
+				HaveField("Applications", ConsistOf(ns+"/reports")),
+				HaveField("Message", ContainSubstring("suspend is not allowed")),
+			),
+			SatisfyAll(
+				HaveField("Applications", ConsistOf(ns+"/legacy")),
+				HaveField("Message", ContainSubstring("halt is not allowed")),
+			),
+		))
+		// A dry run changes no workload.
+		Expect(replicasOf(db)()).To(Equal(int32(1)))
+		Expect(suspendOf(report)()).To(BeFalse())
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(legacy), legacy)).To(Succeed())
+		Expect(legacy.Object["spec"]).To(HaveKeyWithValue("running", true))
 	})
 
 	It("sends no dry run for a workload that a real shutdown does not patch, because its replicas are already 0", func() {
@@ -229,6 +232,10 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		createVM(ns, "manual-vm", map[string]any{"runStrategy": "Manual"})
 		createVMI(ns, "manual-vm")
 		createVM(ns, "stopped-manual-vm", map[string]any{"runStrategy": "Manual"})
+		// A VMI in a final phase has no running guest.
+		createVM(ns, "finished-manual-vm", map[string]any{"runStrategy": "Manual"})
+		createVMI(ns, "finished-manual-vm")
+		setVMIPhase(ns, "finished-manual-vm", "Succeeded")
 
 		status := createPlan()
 
