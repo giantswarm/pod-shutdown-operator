@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: package the operator, and add the kind e2e test and the runbook
 - fix: confirm a cached 0 before a stop, and do not block the scale-up on one failed start
 - fix: return the Node list error at record time, and keep the stale check until a request passes it
+- docs: keep a missing own boot ID entry as a power cycle, and tell what to do in the runbook
 
 ### Fixed
 
