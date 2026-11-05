@@ -28,13 +28,14 @@ func readBootID(path string) (string, error) {
 }
 
 // currentBootIDs returns the boot ID of each node by node name.
-func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[string]string {
+// When the Node list fails, it also returns the error, and the map has no entry for the other nodes.
+func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) (map[string]string, error) {
 	log := ctrl.LoggerFrom(ctx)
 	// The API reader keeps no Node cache in memory.
 	var nodes corev1.NodeList
-	// A failed list must not block the shutdown.
-	if err := r.APIReader.List(ctx, &nodes); err != nil {
-		log.Error(err, "Failed to list the Nodes, records only the own boot ID")
+	listErr := r.APIReader.List(ctx, &nodes)
+	if listErr != nil {
+		listErr = fmt.Errorf("list the Nodes: %w", listErr)
 	}
 	bootIDs := map[string]string{}
 	for _, node := range nodes.Items {
@@ -49,10 +50,10 @@ func (r *ShutdownRequestReconciler) currentBootIDs(ctx context.Context) map[stri
 	// An unreadable file leaves the own entry unknown.
 	if err != nil {
 		log.Error(err, "Failed to read the boot ID, records it as unknown")
-		return bootIDs
+		return bootIDs, listErr
 	}
 	bootIDs[r.NodeName] = bootID
-	return bootIDs
+	return bootIDs, listErr
 }
 
 // checkBoot sets the action Cancel when the own boot ID does not match the record.
@@ -85,8 +86,13 @@ func (r *ShutdownRequestReconciler) checkBoot(ctx context.Context, request *shut
 	}
 	// Write the boot IDs after the Cancel, so that a crash between the writes repeats the check.
 	// A later restart in this boot then does not revert a new Shutdown.
+	bootIDs, err := r.currentBootIDs(ctx)
+	// A failed list must not keep the cluster at 0, so the record then holds only the own boot ID.
+	if err != nil {
+		log.Error(err, "Failed to list the Nodes, records only the own boot ID")
+	}
 	updated := request.DeepCopy()
-	updated.Status.BootIDs = r.currentBootIDs(ctx)
+	updated.Status.BootIDs = bootIDs
 	if err := r.Client.Status().Update(ctx, updated); err != nil {
 		return fmt.Errorf("record the boot IDs after a power cycle: %w", err)
 	}

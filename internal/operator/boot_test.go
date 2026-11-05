@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
@@ -22,6 +23,35 @@ func start(c operator.Config) func() {
 	stop, _ := startOperator(c)
 	DeferCleanup(stop)
 	return stop
+}
+
+// startAndReconcile starts an operator and waits until it has reconciled the request one time.
+// A Consistently directly after a start can otherwise pass before the boot check runs.
+func startAndReconcile(c operator.Config) func() {
+	before := reconcileCount()
+	stop := start(c)
+	Eventually(reconcileCount).Should(BeNumerically(">", before))
+	return stop
+}
+
+// reconcileCount returns the number of ended reconciles of the ShutdownRequest in this process.
+func reconcileCount() float64 {
+	families, err := metrics.Registry.Gather()
+	Expect(err).NotTo(HaveOccurred())
+	var count float64
+	for _, family := range families {
+		if family.GetName() != "controller_runtime_reconcile_total" {
+			continue
+		}
+		for _, m := range family.GetMetric() {
+			for _, label := range m.GetLabel() {
+				if label.GetName() == "controller" && label.GetValue() == "shutdownrequest" {
+					count += m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return count
 }
 
 func actionOf() shutdownv1alpha1.Action {
@@ -81,7 +111,7 @@ var _ = Describe("The boot IDs in the record", func() {
 
 		// The next restart on the same boot is not a power cycle.
 		stop()
-		start(operator.Config{BootIDFile: bootIDFile("boot-2")})
+		startAndReconcile(operator.Config{BootIDFile: bootIDFile("boot-2")})
 		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseComplete))
 		Expect(actionOf()).To(Equal(shutdownv1alpha1.ActionShutdown))
 	})
@@ -122,7 +152,7 @@ var _ = Describe("An operator start", func() {
 		before := getRequest()
 
 		stop()
-		start(operator.Config{BootIDFile: bootIDFile("boot-2")})
+		startAndReconcile(operator.Config{BootIDFile: bootIDFile("boot-2")})
 
 		Consistently(replicasOf(web), time.Second).Should(Equal(int32(5)))
 		Expect(getRequest().ResourceVersion).To(Equal(before.ResourceVersion))
@@ -137,7 +167,7 @@ var _ = Describe("An operator start", func() {
 		Eventually(replicasOf(web)).Should(BeZero())
 
 		stop()
-		start(operator.Config{})
+		startAndReconcile(operator.Config{})
 
 		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseShuttingDown))
 		Expect(replicasOf(web)()).To(BeZero())
@@ -152,7 +182,7 @@ var _ = Describe("An operator start", func() {
 		completeShutdown()
 
 		stop()
-		start(operator.Config{})
+		startAndReconcile(operator.Config{})
 
 		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseComplete))
 		Expect(replicasOf(web)()).To(BeZero())
@@ -167,7 +197,7 @@ var _ = Describe("An operator start", func() {
 		completeShutdown()
 
 		stop()
-		start(operator.Config{NodeName: "node-b", BootIDFile: bootIDFile("boot-b")})
+		startAndReconcile(operator.Config{NodeName: "node-b", BootIDFile: bootIDFile("boot-b")})
 
 		Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseComplete))
 		Expect(actionOf()).To(Equal(shutdownv1alpha1.ActionShutdown))
@@ -214,7 +244,7 @@ var _ = Describe("An operator start", func() {
 	)
 
 	DescribeTable("continues a ScalingUp request",
-		func(restart func() operator.Config) {
+		func(restart func() operator.Config, bootID string) {
 			web := createDeployment(ns, "web", 2)
 			createApplication(ns, "shop", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
 			stop := start(operator.Config{})
@@ -223,17 +253,18 @@ var _ = Describe("An operator start", func() {
 			Eventually(replicasOf(web)).Should(Equal(int32(2)))
 
 			stop()
-			start(restart())
+			startAndReconcile(restart())
 
 			Consistently(phaseOf, time.Second).Should(Equal(shutdownv1alpha1.PhaseScalingUp))
 			Expect(replicasOf(web)()).To(Equal(int32(2)))
+			Expect(getRequest().Status.BootIDs).To(HaveKeyWithValue(operatorNode, bootID))
 			markReady(web, 2)
 			Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
 		},
-		Entry("with an equal boot ID", func() operator.Config { return operator.Config{} }),
+		Entry("with an equal boot ID", func() operator.Config { return operator.Config{} }, operatorBootID),
 		Entry("with a changed boot ID", func() operator.Config {
 			return operator.Config{BootIDFile: bootIDFile("boot-2")}
-		}),
+		}, "boot-2"),
 	)
 
 	It("starts a Shutdown that waits in ScalingUp after a restart in the same boot as the power cycle", func() {

@@ -51,6 +51,10 @@ type ShutdownRequestReconciler struct {
 
 	bootChecked bool
 
+	// staleChecked is true after a request with no phase passes the stale check in this process.
+	// A young request whose start fails for longer than the stale limit is then not stale.
+	staleChecked bool
+
 	// The state in memory has no lock. One worker reconciles the request, because it is the only object.
 	stop    stopState
 	scaleUp scaleUpState
@@ -93,8 +97,12 @@ func (r *ShutdownRequestReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, r.startScaleUp(ctx, &request)
 	case request.Status.Phase == "" && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
 		// An old request must not stop the cluster after a power-on. A negative age is not stale.
-		if r.Clock.Since(request.CreationTimestamp.Time) > r.StaleLimit {
-			return ctrl.Result{}, r.markStale(ctx, &request)
+		// A failed markStale checks again at the retry.
+		if !r.staleChecked {
+			if r.Clock.Since(request.CreationTimestamp.Time) > r.StaleLimit {
+				return ctrl.Result{}, r.markStale(ctx, &request)
+			}
+			r.staleChecked = true
 		}
 		return ctrl.Result{}, r.startShutdown(ctx, &request)
 	case request.Status.Phase == shutdownv1alpha1.PhaseScalingUp && request.Spec.Action == shutdownv1alpha1.ActionShutdown:
