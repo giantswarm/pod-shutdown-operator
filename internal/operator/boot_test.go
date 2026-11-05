@@ -241,6 +241,10 @@ var _ = Describe("An operator start", func() {
 		Entry("in Complete with no entry for the node in the record", shutdownv1alpha1.PhaseComplete, func() operator.Config {
 			return operator.Config{NodeName: "other-node"}
 		}),
+		// A node that joins after the record gives a false power cycle on purpose. See #84.
+		Entry("in ShuttingDown with no entry for the node in the record", shutdownv1alpha1.PhaseShuttingDown, func() operator.Config {
+			return operator.Config{NodeName: "other-node"}
+		}),
 	)
 
 	DescribeTable("continues a ScalingUp request",
