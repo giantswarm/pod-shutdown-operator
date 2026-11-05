@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/clock"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +43,12 @@ type Server struct {
 
 	// TokenFile is read at each call, so a new Secret value needs no restart.
 	TokenFile string
+
+	// StaleLimit is the age after which a request with no phase is stale. It is equal to the limit of the operator.
+	StaleLimit time.Duration
+
+	// Clock gives the age of a request, so that a test can set it.
+	Clock clock.PassiveClock
 }
 
 // Progress is the response of GET /progress. It holds no application names.
@@ -121,6 +128,9 @@ func (s *Server) shutdown(ctx context.Context) error {
 	// After Restored, a new request replaces the old one.
 	case request.Status.Phase == shutdownv1alpha1.PhaseRestored:
 		return s.replace(ctx, request)
+	// The operator makes an old request with no phase stale, so a new request replaces it. A negative age is not stale.
+	case request.Status.Phase == "" && s.Clock.Since(request.CreationTimestamp.Time) > s.StaleLimit:
+		return s.replace(ctx, request)
 	// With no phase, the operator starts the request.
 	case request.Status.Phase == "":
 		return nil
@@ -178,7 +188,7 @@ func (s *Server) replace(ctx context.Context, request *shutdownv1alpha1.Shutdown
 	// The delete fails with a conflict when the request changed after the read.
 	precondition := client.Preconditions{UID: &request.UID, ResourceVersion: &request.ResourceVersion}
 	if err := s.Client.Delete(ctx, request, precondition); err != nil {
-		return fmt.Errorf("delete the Restored ShutdownRequest: %w", err)
+		return fmt.Errorf("delete the old ShutdownRequest: %w", err)
 	}
 	return s.create(ctx)
 }

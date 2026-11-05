@@ -122,9 +122,11 @@ func NewManager(restConfig *rest.Config, c Config) (ctrl.Manager, error) {
 
 	if c.APIBindAddress != "" {
 		server := &api.Server{
-			Client:    client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
-			Reader:    mgr.GetAPIReader(),
-			TokenFile: c.APITokenFile,
+			Client:     client.WithFieldOwner(mgr.GetClient(), c.FieldOwner),
+			Reader:     mgr.GetAPIReader(),
+			TokenFile:  c.APITokenFile,
+			StaleLimit: c.StaleLimit,
+			Clock:      c.Clock,
 		}
 		if err := mgr.Add(&manager.Server{
 			Name: "api",

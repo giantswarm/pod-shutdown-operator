@@ -16,6 +16,7 @@ import (
 	coordinationv1 "k8s.io/api/coordination/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clocktesting "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -387,6 +388,25 @@ var _ = Describe("The HTTP endpoint", func() {
 			code, _ = call(http.MethodPost, url+"/cancel", apiToken)
 			Expect(code).To(Equal(http.StatusUnauthorized))
 			Expect(getRequest().ResourceVersion).To(Equal(before.ResourceVersion))
+		})
+	})
+
+	Context("with a clock after the stale limit", func() {
+		// The operator makes the old request stale, so the call must not be lost.
+		It("replaces a request with no phase in POST /shutdown", func() {
+			c := standbyConfig()
+			c.Clock = clocktesting.NewFakePassiveClock(time.Now().Add(time.Hour))
+			url, _ := startAPI(c, apiToken)
+			DeferCleanup(func() { cleanUp() })
+			before := createRequestInPhase(shutdownv1alpha1.ActionShutdown, "")
+
+			code, _ := call(http.MethodPost, url+"/shutdown", apiToken)
+
+			Expect(code).To(Equal(http.StatusAccepted))
+			request := getRequest()
+			Expect(request.UID).NotTo(Equal(before.UID))
+			Expect(request.Spec.Action).To(Equal(shutdownv1alpha1.ActionShutdown))
+			Expect(request.Status.Phase).To(BeEmpty())
 		})
 	})
 
