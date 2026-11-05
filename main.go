@@ -51,7 +51,7 @@ func main() {
 	flag.StringVar(&nodeName, "node-name", os.Getenv("NODE_NAME"),
 		"The name of the operator node, for example from the Downward API. The default is the value of NODE_NAME.")
 	flag.DurationVar(&staleLimit, "stale-limit", 5*time.Minute, "The age after which a request with no phase is stale. "+
-		"The operator then sets the phase Restored with the reason Stale, and changes nothing else.")
+		"The operator then sets the phase Restored with the reason Stale, and changes nothing else. POST /shutdown replaces a stale request with a new one.")
 	flag.StringVar(&fluxControllerList, "flux-controllers", "flux-system/kustomize-controller,flux-system/helm-controller",
 		"The Flux controller Deployments, as a comma-separated list of namespace/name. The operator scales them to 0 "+
 			"before it stops an application, and back after the scale-up. Empty disables the Flux step.")

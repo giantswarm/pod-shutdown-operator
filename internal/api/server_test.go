@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	clocktesting "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -37,7 +39,7 @@ func newServer(t *testing.T, request *shutdownv1alpha1.ShutdownRequest, funcs in
 	if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return &Server{Client: c, Reader: c, TokenFile: tokenFile}, c
+	return &Server{Client: c, Reader: c, TokenFile: tokenFile, StaleLimit: 5 * time.Minute, Clock: clocktesting.NewFakePassiveClock(time.Now())}, c
 }
 
 func newRequest(action shutdownv1alpha1.Action, phase shutdownv1alpha1.Phase) *shutdownv1alpha1.ShutdownRequest {
@@ -128,5 +130,69 @@ func TestShutdownDoesNotDeleteARequestThatChanged(t *testing.T) {
 
 	request := getRequest(t, c)
 	g.Expect(request.UID).To(BeEquivalentTo("new"))
+	g.Expect(request.Status.Phase).To(Equal(shutdownv1alpha1.PhaseShuttingDown))
+}
+
+// A request with no phase that is older than the stale limit becomes Restored with the reason Stale at the next
+// reconcile. A shutdown replaces it, so that the call is not lost.
+func TestShutdownReplacesARequestWithNoPhaseAfterTheStaleLimit(t *testing.T) {
+	g := NewWithT(t)
+	old := newRequest(shutdownv1alpha1.ActionShutdown, "")
+	old.CreationTimestamp = metav1.NewTime(time.Now().Add(-6 * time.Minute))
+	s, c := newServer(t, old, interceptor.Funcs{})
+
+	g.Expect(post(s, "/shutdown")).To(Equal(http.StatusAccepted))
+
+	request := getRequest(t, c)
+	g.Expect(request.UID).NotTo(BeEquivalentTo("old"))
+	g.Expect(request.Spec.Action).To(Equal(shutdownv1alpha1.ActionShutdown))
+	g.Expect(request.Status.Phase).To(BeEmpty())
+}
+
+// The operator starts a young request with no phase, so a shutdown changes nothing. A negative age is not stale.
+func TestShutdownKeepsARequestWithNoPhaseBeforeTheStaleLimit(t *testing.T) {
+	for name, age := range map[string]time.Duration{
+		"young":        4 * time.Minute,
+		"negative age": -time.Hour,
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := NewWithT(t)
+			young := newRequest(shutdownv1alpha1.ActionShutdown, "")
+			young.CreationTimestamp = metav1.NewTime(time.Now().Add(-age))
+			s, c := newServer(t, young, interceptor.Funcs{})
+			before := getRequest(t, c)
+
+			g.Expect(post(s, "/shutdown")).To(Equal(http.StatusAccepted))
+
+			request := getRequest(t, c)
+			g.Expect(request.UID).To(BeEquivalentTo("old"))
+			g.Expect(request.ResourceVersion).To(Equal(before.ResourceVersion))
+		})
+	}
+}
+
+// A shutdown reads an old request with no phase, and the leader starts it before the delete. The precondition
+// fails the delete, and the retry reads ShuttingDown, where the request keeps the action Shutdown.
+func TestShutdownDoesNotReplaceAnOldRequestThatTheLeaderStarted(t *testing.T) {
+	g := NewWithT(t)
+	old := newRequest(shutdownv1alpha1.ActionShutdown, "")
+	old.CreationTimestamp = metav1.NewTime(time.Now().Add(-6 * time.Minute))
+	changed := false
+	s, c := newServer(t, old, interceptor.Funcs{
+		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+			if !changed {
+				changed = true
+				if err := setPhase(ctx, c, shutdownv1alpha1.PhaseShuttingDown); err != nil {
+					return err
+				}
+			}
+			return c.Delete(ctx, obj, opts...)
+		},
+	})
+
+	g.Expect(post(s, "/shutdown")).To(Equal(http.StatusAccepted))
+
+	request := getRequest(t, c)
+	g.Expect(request.UID).To(BeEquivalentTo("old"))
 	g.Expect(request.Status.Phase).To(Equal(shutdownv1alpha1.PhaseShuttingDown))
 }
