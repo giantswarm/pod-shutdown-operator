@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,6 +69,56 @@ func TestStopWorkloadConfirmsACachedZeroWithALiveRead(t *testing.T) {
 			}
 			if replicas := ptr.Deref(got.Spec.Replicas, 1); replicas != 0 {
 				t.Errorf("replicas on the API server: got %d, want 0", replicas)
+			}
+		})
+	}
+}
+
+func TestStopWorkloadWhenTheLiveReadFails(t *testing.T) {
+	tests := map[string]struct {
+		liveErr   error
+		wantEnded bool
+		wantErr   bool
+	}{
+		// A workload that no longer exists counts as stopped.
+		"the workload no longer exists": {liveErr: apierrors.NewNotFound(appsv1.Resource("deployments"), "backend"), wantEnded: true},
+		// The next poll tries again.
+		"the read fails": {liveErr: errors.New("connection refused"), wantErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			// The cache shows 0, so stopWorkload reads the workload live.
+			backend := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "backend"},
+				Spec:       appsv1.DeploymentSpec{Replicas: ptr.To[int32](0)},
+			}
+			c := fake.NewClientBuilder().WithObjects(backend).Build()
+			patches := 0
+			counting := interceptor.NewClient(c, interceptor.Funcs{
+				Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					patches++
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+			})
+			live := interceptor.NewClient(c, interceptor.Funcs{
+				Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+					return tt.liveErr
+				},
+			})
+			r := &ShutdownRequestReconciler{Client: counting, APIReader: live}
+
+			w := shutdownv1alpha1.RecordedWorkload{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: backend.Name}
+			ended, err := r.stopWorkload(context.Background(), backend.Namespace, w, false)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error: got %v, want an error: %t", err, tt.wantErr)
+			}
+			if ended != tt.wantEnded {
+				t.Errorf("ended: got %t, want %t", ended, tt.wantEnded)
+			}
+			// The operator does not send a patch when it cannot confirm the replicas.
+			if patches != 0 {
+				t.Errorf("patches: got %d, want 0", patches)
 			}
 		})
 	}

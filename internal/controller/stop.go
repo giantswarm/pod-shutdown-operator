@@ -210,6 +210,7 @@ func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shu
 }
 
 // stopWorkload scales a workload to 0. It returns true when no pod of the workload remains.
+// When the cache shows 0 replicas, a live read confirms the 0 before the operator skips the patch.
 // With force, it deletes the remaining pods with a grace period of 0.
 func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload, force bool) (bool, error) {
 	switch w.Kind {

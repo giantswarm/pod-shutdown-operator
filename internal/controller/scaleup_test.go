@@ -20,8 +20,8 @@ import (
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
 )
 
-// failedReadsCase is a scale-up in which each read of a ManagedApplication fails.
-type failedReadsCase struct {
+// scaleUpCase is a scale-up in which some calls to the API server fail.
+type scaleUpCase struct {
 	pastLimit bool
 	// wantFlux is the Flux replicas after the reconcile. wantPhase and wantDegraded are the status after it.
 	wantFlux     int32
@@ -31,7 +31,7 @@ type failedReadsCase struct {
 }
 
 func TestContinueScaleUpWhenTheManagedApplicationReadsFail(t *testing.T) {
-	tests := map[string]failedReadsCase{
+	tests := map[string]scaleUpCase{
 		// The backoff of controller-runtime can delay the scale-up past the global time limit.
 		"before the global time limit": {
 			wantFlux:   0,
@@ -46,14 +46,64 @@ func TestContinueScaleUpWhenTheManagedApplicationReadsFail(t *testing.T) {
 			wantDegraded: []string{"shop/store"},
 		},
 	}
+	// Each read of a ManagedApplication fails, for example while the cache has not synced.
+	errRead := errors.New("the cache has not synced")
+	failing := interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*shutdownv1alpha1.ManagedApplication); ok {
+				return errRead
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*shutdownv1alpha1.ManagedApplicationList); ok {
+				return errRead
+			}
+			return c.List(ctx, list, opts...)
+		},
+	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			testScaleUpWithFailedReads(t, tt)
+			testScaleUp(t, tt, failing)
 		})
 	}
 }
 
-func testScaleUpWithFailedReads(t *testing.T, tt failedReadsCase) {
+func TestContinueScaleUpWhenTheStartOfAWorkloadFails(t *testing.T) {
+	tests := map[string]scaleUpCase{
+		// The application is not ready for this poll. Its readyTimeout has not passed, so it is not degraded yet.
+		"before the global time limit": {
+			wantFlux:   0,
+			wantPhase:  shutdownv1alpha1.PhaseScalingUp,
+			wantResult: ctrl.Result{RequeueAfter: time.Second},
+		},
+		// A failed write must not keep Flux at 0, so the application becomes degraded at once.
+		"past the global time limit": {
+			pastLimit:    true,
+			wantFlux:     1,
+			wantPhase:    shutdownv1alpha1.PhaseRestored,
+			wantDegraded: []string{"shop/store"},
+		},
+	}
+	// Each scale patch of the application workload fails, for example when a webhook cannot be reached.
+	failing := interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if obj.GetNamespace() == "shop" {
+				return errors.New("failed calling webhook")
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			testScaleUp(t, tt, failing)
+		})
+	}
+}
+
+// testScaleUp runs one reconcile of a scale-up of one application and one Flux controller.
+// The funcs make some calls to the API server fail.
+func testScaleUp(t *testing.T, tt scaleUpCase, funcs interceptor.Funcs) {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
@@ -86,23 +136,7 @@ func testScaleUpWithFailedReads(t *testing.T, tt failedReadsCase) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(flux, web, request).WithStatusSubresource(request).Build()
-	// Each read of a ManagedApplication fails, for example while the cache has not synced.
-	errRead := errors.New("the cache has not synced")
-	failing := interceptor.NewClient(c, interceptor.Funcs{
-		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if _, ok := obj.(*shutdownv1alpha1.ManagedApplication); ok {
-				return errRead
-			}
-			return c.Get(ctx, key, obj, opts...)
-		},
-		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			if _, ok := list.(*shutdownv1alpha1.ManagedApplicationList); ok {
-				return errRead
-			}
-			return c.List(ctx, list, opts...)
-		},
-	})
-	r := &ShutdownRequestReconciler{Client: failing, ScaleUpTimeout: 2 * time.Hour, PollInterval: time.Second}
+	r := &ShutdownRequestReconciler{Client: interceptor.NewClient(c, funcs), ScaleUpTimeout: 2 * time.Hour, PollInterval: time.Second}
 	if tt.pastLimit {
 		r.ScaleUpTimeout = time.Minute
 	}

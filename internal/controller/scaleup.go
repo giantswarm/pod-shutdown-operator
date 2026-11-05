@@ -136,6 +136,11 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 		}
 	}
 	pending := len(done) < len(apps)
+	// The log comes before the writes, so that a failed write does not hide the errors.
+	// An application with an error is not ready for this poll. It becomes degraded at its readyTimeout or at the global time limit.
+	if len(errs) > 0 {
+		log.Error(errors.Join(errs...), "Failed to start or check some applications")
+	}
 
 	// Flux comes back last, so that it cannot revert the counts during the scale-up.
 	if !pending {
@@ -154,9 +159,6 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 			return ctrl.Result{}, fmt.Errorf("write the scale-up progress: %w", err)
 		}
 	}
-	if len(errs) > 0 {
-		log.Error(errors.Join(errs...), "Failed to start some applications, each becomes degraded at its readyTimeout or at the global time limit")
-	}
 	if !pending {
 		return ctrl.Result{}, nil
 	}
@@ -164,7 +166,8 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 }
 
 // startApplication scales the workloads of an application to their recorded counts.
-// It returns true when all of them are ready.
+// It returns true when all of them are ready. After an error, it tries the other workloads,
+// and then it returns false with the joined errors.
 func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication) (bool, error) {
 	ready := true
 	var errs []error
