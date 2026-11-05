@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: try each Flux controller and requeue at the poll interval after a failed Flux start
 - fix: replace an old request with no phase on POST /shutdown, so that the stale rule does not drop the call
 - fix: do not halt a RerunOnFailure VM whose VMI is already in deletion
+- fix: read the VM terminationGracePeriodSeconds from the running VMI
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
