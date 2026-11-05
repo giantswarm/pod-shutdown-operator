@@ -116,6 +116,73 @@ var _ = Describe("The Flux controllers", func() {
 		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
 	})
 
+	It("starts the groups at the start of the shutdown with no Flux controllers", func() {
+		web := createDeployment(ns, "web", 1)
+		createDeployment(ns, "db", 1)
+		createOwnedPod(ns, "web-0", web)
+		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindDeployment, "db"))
+		setDependsOn(ns, "frontend", "database")
+		setGracePeriod(ns, "frontend", 8*time.Second)
+		setGracePeriod(ns, "database", 8*time.Second)
+		stop, _ = startOperator(operator.Config{FluxStopTimeout: 4 * time.Second})
+
+		// The time available is 8s, and the chain is 16s, so each gracePeriod shrinks to 4s.
+		createShutdownRequestWithBudget(9*time.Second, time.Second)
+		start := startedAt()
+
+		// With the groups at the Flux limit of 4s, the deadline of frontend is 6s after the start.
+		Consistently(podExists(ns, "web-0"), until(start.Add(3500*time.Millisecond))).Should(BeTrue())
+		Eventually(podExists(ns, "web-0")).Should(BeFalse())
+		Expect(time.Since(start)).To(BeNumerically("<", 5*time.Second))
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+		Expect(getRequest().Status.RecordedState.FluxControllers).To(BeEmpty())
+		Expect(replicasOf(kustomize)()).To(Equal(int32(1)))
+	})
+
+	It("keeps the stop times of the groups after an operator restart that follows the Flux step, and scales Flux back", func() {
+		createPod(fluxNS, "kustomize-controller-0", appLabels("kustomize-controller"))
+		web := createDeployment(ns, "web", 1)
+		db := createDeployment(ns, "db", 1)
+		createOwnedPod(ns, "web-0", web)
+		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		createApplication(ns, "database", workload(shutdownv1alpha1.WorkloadKindDeployment, "db"))
+		setDependsOn(ns, "frontend", "database")
+		setGracePeriod(ns, "frontend", 8*time.Second)
+		setGracePeriod(ns, "database", 8*time.Second)
+		startWithFlux(operator.Config{FluxStopTimeout: 2 * time.Second})
+
+		// The time available is 12s minus the Flux limit of 2s, and the chain is 16s, so each gracePeriod shrinks to 5s.
+		// The deadline of frontend is 7s after the start.
+		createShutdownRequestWithBudget(13*time.Second, time.Second)
+		start := startedAt()
+		// The Flux step ends at its time limit, and the Flux pod still runs.
+		Eventually(replicasOf(web)).Should(BeZero())
+		Expect(podExists(fluxNS, "kustomize-controller-0")()).To(BeTrue())
+		Consistently(podExists(ns, "web-0"), until(start.Add(5*time.Second))).Should(BeTrue())
+
+		stop()
+		startWithFlux(operator.Config{FluxStopTimeout: 2 * time.Second})
+
+		// The new operator runs the Flux step again, and the step ends at once.
+		// With the groups at the end of this step, the deadline of frontend is 8.5s after the start.
+		// With the groups at the start of the shutdown, it is 6s after the start.
+		Consistently(podExists(ns, "web-0"), until(start.Add(6500*time.Millisecond))).Should(BeTrue())
+		Eventually(podExists(ns, "web-0")).Should(BeFalse())
+		Expect(time.Since(start)).To(BeNumerically("<", 8*time.Second))
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(replicasOf(db)).Should(Equal(int32(1)))
+		markReady(db, 1)
+		Eventually(replicasOf(web)).Should(Equal(int32(1)))
+		markReady(web, 1)
+		Eventually(replicasOf(kustomize)).Should(Equal(int32(1)))
+		Eventually(replicasOf(helm)).Should(Equal(int32(2)))
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+	})
+
 	It("ends the Flux step at the end of the budget when the Flux time limit is longer", func() {
 		createPod(fluxNS, "kustomize-controller-0", appLabels("kustomize-controller"))
 		web := createDeployment(ns, "web", 2)
@@ -202,6 +269,35 @@ var _ = Describe("The Flux controllers", func() {
 		Eventually(replicasOf(web)).Should(Equal(int32(2)))
 		Eventually(replicasOf(kustomize)).Should(Equal(int32(1)))
 		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(getRequest().Status.Degraded).To(ConsistOf(ns+"/db", ns+"/web"))
+	})
+
+	It("does not start the global scale-up time limit again after an operator restart, and scales Flux back", func() {
+		db := createDeployment(ns, "db", 1)
+		web := createDeployment(ns, "web", 2)
+		createApplication(ns, "db", workload(shutdownv1alpha1.WorkloadKindDeployment, "db"))
+		createApplication(ns, "web", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+		setDependsOn(ns, "web", "db")
+		startWithFlux(operator.Config{FluxStopTimeout: time.Minute, ScaleUpTimeout: 4 * time.Second})
+		completeShutdown()
+		// db does not become ready, and its readyTimeout is the default of 5 minutes.
+		setAction(shutdownv1alpha1.ActionCancel)
+		start := scaleUpStartedAt()
+		Eventually(replicasOf(db)).Should(Equal(int32(1)))
+
+		// No operator runs at the global time limit.
+		stop()
+		webAndFlux := func() []int32 { return []int32{replicasOf(web)(), replicasOf(kustomize)()} }
+		Consistently(webAndFlux, until(start.Add(4500*time.Millisecond))).Should(Equal([]int32{0, 0}))
+		restarted := time.Now()
+		startWithFlux(operator.Config{FluxStopTimeout: time.Minute, ScaleUpTimeout: 4 * time.Second})
+
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		// A new global time limit would end 4s after the restart.
+		Expect(time.Since(restarted)).To(BeNumerically("<", 3*time.Second))
+		Expect(replicasOf(web)()).To(Equal(int32(2)))
+		Expect(replicasOf(kustomize)()).To(Equal(int32(1)))
+		Expect(replicasOf(helm)()).To(Equal(int32(2)))
 		Expect(getRequest().Status.Degraded).To(ConsistOf(ns+"/db", ns+"/web"))
 	})
 
