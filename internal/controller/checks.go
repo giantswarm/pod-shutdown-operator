@@ -156,7 +156,7 @@ func (p planner) vmStopPatch(ctx context.Context, namespace, name string) (clien
 	// A real shutdown keeps the field of a VM that does not run, when the run strategy does not tell this.
 	if !usesRunning && !strategyTellsState(strategy) {
 		vmi, err := p.runningVMI(ctx, namespace, name)
-		if err != nil || vmi == nil {
+		if err != nil || vmi == nil || stoppedByUser(strategy, vmi) {
 			return nil, nil, err
 		}
 	}

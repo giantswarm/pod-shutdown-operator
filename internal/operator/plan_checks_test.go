@@ -9,9 +9,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
@@ -34,6 +37,55 @@ func deleteAllWorkloads() {
 func setTerminationGracePeriod(obj client.Object, seconds int64) {
 	patch := client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"spec":{"template":{"spec":{"terminationGracePeriodSeconds":%d}}}}`, seconds))
 	Expect(k8sClient.Patch(ctx, obj, patch)).To(Succeed())
+}
+
+// guardVMs makes the API server reject a halt of each VM in the namespace.
+func guardVMs(ns string) {
+	policy := &admissionregistrationv1.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-vm-halt-"},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
+			FailurePolicy: ptr.To(admissionregistrationv1.Fail),
+			MatchConstraints: &admissionregistrationv1.MatchResources{
+				ResourceRules: []admissionregistrationv1.NamedRuleWithOperations{{
+					RuleWithOperations: admissionregistrationv1.RuleWithOperations{
+						Operations: []admissionregistrationv1.OperationType{admissionregistrationv1.Update},
+						Rule: admissionregistrationv1.Rule{
+							APIGroups:   []string{"kubevirt.io"},
+							APIVersions: []string{"v1"},
+							Resources:   []string{"virtualmachines"},
+						},
+					},
+				}},
+			},
+			Validations: []admissionregistrationv1.Validation{{
+				Expression: `!has(object.spec.runStrategy) || object.spec.runStrategy != "Halted"`,
+				Message:    "halt is not allowed",
+			}},
+		},
+	}
+	Expect(k8sClient.Create(ctx, policy)).To(Succeed())
+	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, policy)).To(Succeed()) })
+
+	binding := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: "reject-vm-halt-"},
+		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
+			PolicyName:        policy.Name,
+			ValidationActions: []admissionregistrationv1.ValidationAction{admissionregistrationv1.Deny},
+			MatchResources: &admissionregistrationv1.MatchResources{
+				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, binding)).To(Succeed())
+	DeferCleanup(func() { Expect(k8sClient.Delete(ctx, binding)).To(Succeed()) })
+
+	// Wait until the API server applies the policy. No application lists the probe VM.
+	createVM(ns, "guard-probe", map[string]any{"runStrategy": "Always"})
+	probe := newKubeVirtObject("VirtualMachine", ns, "guard-probe")
+	halt := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"runStrategy":"Halted"}}`))
+	Eventually(func() error {
+		return k8sClient.Patch(ctx, probe, halt, client.DryRunAll)
+	}).Should(MatchError(ContainSubstring("halt is not allowed")))
 }
 
 // applicationsIn returns the applications of the findings.
@@ -111,6 +163,23 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 
 		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultOK))
 		Expect(findingsWith(status, shutdownv1alpha1.ReasonPatchRejected)).To(BeEmpty())
+	})
+
+	It("sends no dry run for a RerunOnFailure VM whose VMI is in deletion, because a real shutdown does not halt it", func() {
+		stop, _ = startOperator(operator.Config{})
+		guardVMs(ns)
+		createVM(ns, "rerun-on", map[string]any{"runStrategy": "RerunOnFailure"})
+		createVMI(ns, "rerun-on")
+		// A stop by a user just before the shutdown deletes the VMI.
+		createVM(ns, "rerun-stopping", map[string]any{"runStrategy": "RerunOnFailure"})
+		createVMI(ns, "rerun-stopping")
+		terminateVMI(ns, "rerun-stopping")
+		createApplication(ns, "on", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "rerun-on"))
+		createApplication(ns, "stopping", workload(shutdownv1alpha1.WorkloadKindVirtualMachine, "rerun-stopping"))
+
+		status := createPlan()
+
+		Expect(applicationsIn(findingsWith(status, shutdownv1alpha1.ReasonPatchRejected))).To(ConsistOf(ns + "/on"))
 	})
 
 	It("reports a dry run that fails with a server error as an Error, and still writes the plan", func() {
