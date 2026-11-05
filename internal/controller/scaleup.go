@@ -143,23 +143,27 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	}
 
 	// Flux comes back last, so that it cannot revert the counts during the scale-up.
+	restored := !pending
 	if !pending {
+		// The error does not go back to controller-runtime, because its backoff can keep Flux at 0 for minutes.
+		// The request stays in ScalingUp, because no reconcile starts Flux after Restored.
 		if err := r.startFlux(ctx, request.Status.RecordedState.FluxControllers); err != nil {
-			return ctrl.Result{}, err
+			log.Error(err, "Failed to start Flux, tries again at the next poll")
+			restored = false
 		}
 	}
 
-	if len(degraded) != len(request.Status.Degraded) || !pending {
+	if len(degraded) != len(request.Status.Degraded) || restored {
 		updated := request.DeepCopy()
 		updated.Status.Degraded = degraded
-		if !pending {
+		if restored {
 			updated.Status.Phase = shutdownv1alpha1.PhaseRestored
 		}
 		if err := r.Client.Status().Update(ctx, updated); err != nil {
 			return ctrl.Result{}, fmt.Errorf("write the scale-up progress: %w", err)
 		}
 	}
-	if !pending {
+	if restored {
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil

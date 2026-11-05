@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"k8s.io/utils/ptr"
@@ -52,12 +53,15 @@ func (r *ShutdownRequestReconciler) stopFlux(ctx context.Context, controllers []
 }
 
 // startFlux scales the recorded Flux controllers back to their recorded replicas. It does not wait for readiness.
+// After an error, it tries the other controllers, and then it returns the joined errors.
 func (r *ShutdownRequestReconciler) startFlux(ctx context.Context, controllers []shutdownv1alpha1.RecordedFluxController) error {
+	var errs []error
 	for _, c := range controllers {
 		w := shutdownv1alpha1.RecordedWorkload{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: c.Name, Replicas: ptr.To(c.Replicas)}
+		// An error on one controller does not stop the start of the other controllers.
 		if _, err := r.startWorkload(ctx, c.Namespace, w); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

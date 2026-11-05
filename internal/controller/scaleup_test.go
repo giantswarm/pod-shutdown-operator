@@ -170,3 +170,84 @@ func testScaleUp(t *testing.T, tt scaleUpCase, funcs interceptor.Funcs) {
 		t.Errorf("degraded: got %v, want %v", current.Status.Degraded, tt.wantDegraded)
 	}
 }
+
+// A failed Flux start must not use the backoff of controller-runtime, and must not stop the start of the other controllers.
+func TestContinueScaleUpWhenTheStartOfAFluxControllerFails(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := shutdownv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	deployment := func(namespace, name string) *appsv1.Deployment {
+		return &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+			Spec:       appsv1.DeploymentSpec{Replicas: ptr.To[int32](0)},
+		}
+	}
+	kustomize := deployment("flux-system", "kustomize-controller")
+	helm := deployment("flux-system", "helm-controller")
+	web := deployment("shop", "web")
+	request := &shutdownv1alpha1.ShutdownRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: shutdownv1alpha1.ShutdownRequestName},
+		Status: shutdownv1alpha1.ShutdownRequestStatus{
+			Phase:            shutdownv1alpha1.PhaseScalingUp,
+			ScaleUpStartedAt: &metav1.Time{Time: time.Now().Add(-time.Hour)},
+			RecordedState: &shutdownv1alpha1.RecordedState{
+				Applications: []shutdownv1alpha1.RecordedApplication{{
+					Namespace: web.Namespace,
+					Name:      "store",
+					Workloads: []shutdownv1alpha1.RecordedWorkload{{Kind: shutdownv1alpha1.WorkloadKindDeployment, Name: web.Name, Replicas: ptr.To[int32](2)}},
+				}},
+				FluxControllers: []shutdownv1alpha1.RecordedFluxController{
+					{Namespace: kustomize.Namespace, Name: kustomize.Name, Replicas: 1},
+					{Namespace: helm.Namespace, Name: helm.Name, Replicas: 2},
+				},
+			},
+		},
+	}
+	// The scale patch of the first Flux controller fails, for example when a webhook cannot be reached.
+	failing := interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			if obj.GetName() == kustomize.Name {
+				return errors.New("failed calling webhook")
+			}
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(kustomize, helm, web, request).WithStatusSubresource(request).Build()
+	// Past the global time limit, the application becomes degraded at once, so the reconcile starts Flux.
+	r := &ShutdownRequestReconciler{Client: interceptor.NewClient(c, failing), ScaleUpTimeout: time.Minute, PollInterval: time.Second}
+
+	ctx := context.Background()
+	var current shutdownv1alpha1.ShutdownRequest
+	if err := c.Get(ctx, client.ObjectKeyFromObject(request), &current); err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.continueScaleUp(ctx, &current)
+	if err != nil {
+		t.Fatalf("continueScaleUp: %v", err)
+	}
+	if want := (ctrl.Result{RequeueAfter: time.Second}); result != want {
+		t.Errorf("result: got %+v, want %+v", result, want)
+	}
+
+	// The other Flux controller starts.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(helm), helm); err != nil {
+		t.Fatal(err)
+	}
+	if replicas := ptr.Deref(helm.Spec.Replicas, 0); replicas != 2 {
+		t.Errorf("helm-controller replicas: got %d, want 2", replicas)
+	}
+	// The request stays in ScalingUp, so that the next poll starts Flux again. The degraded application is written.
+	if err := c.Get(ctx, client.ObjectKeyFromObject(request), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Status.Phase != shutdownv1alpha1.PhaseScalingUp {
+		t.Errorf("phase: got %q, want %q", current.Status.Phase, shutdownv1alpha1.PhaseScalingUp)
+	}
+	if want := []string{appKey(web.Namespace, "store")}; !slices.Equal(current.Status.Degraded, want) {
+		t.Errorf("degraded: got %v, want %v", current.Status.Degraded, want)
+	}
+}
