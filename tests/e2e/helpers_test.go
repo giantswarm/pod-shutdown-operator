@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -186,6 +187,17 @@ func pods(ns, name string) func() ([]corev1.Pod, error) {
 		var list corev1.PodList
 		err := k8sClient.List(ctx, &list, client.InNamespace(ns), client.MatchingLabels(labels(name)))
 		return list.Items, err
+	}
+}
+
+// runningPods returns the pods with the label app=name that are not in a terminal phase, as the operator counts them.
+// After its container ends, a pod in deletion stays for a short time in a terminal phase.
+func runningPods(ns, name string) func() ([]corev1.Pod, error) {
+	return func() ([]corev1.Pod, error) {
+		list, err := pods(ns, name)()
+		return slices.DeleteFunc(list, func(pod corev1.Pod) bool {
+			return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
+		}), err
 	}
 }
 

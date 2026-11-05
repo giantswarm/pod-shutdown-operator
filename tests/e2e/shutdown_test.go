@@ -65,8 +65,9 @@ var _ = Describe("A shutdown in a kind cluster", func() {
 		Expect(p.Stopped).To(Equal(p.Total))
 		Expect(deploymentReplicas(ns, "web")()).To(BeZero())
 		Expect(statefulSetReplicas(ns, "db")()).To(BeZero())
-		Expect(pods(ns, "web")()).To(BeEmpty())
-		Expect(pods(ns, "db")()).To(BeEmpty())
+		// Complete means that no container runs. A pod with no running container can still exist for a short time.
+		Expect(runningPods(ns, "web")()).To(BeEmpty())
+		Expect(runningPods(ns, "db")()).To(BeEmpty())
 		Expect(cronJobSuspended(ns, "report")()).To(BeTrue())
 		for _, name := range fluxControllers {
 			Expect(deploymentReplicas(fluxNamespace, name)()).To(BeZero())
