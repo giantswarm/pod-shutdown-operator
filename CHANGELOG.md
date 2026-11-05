@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: add the ShutdownPlan dry run
 - feat: add the cluster checks to the ShutdownPlan dry run
 - feat: package the operator, and add the kind e2e test and the runbook
+- fix: confirm a cached 0 before a stop, and do not block the scale-up on one failed start
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main

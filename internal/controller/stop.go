@@ -210,6 +210,7 @@ func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shu
 }
 
 // stopWorkload scales a workload to 0. It returns true when no pod of the workload remains.
+// When the cache shows 0 replicas, a live read confirms the 0 before the operator skips the patch.
 // With force, it deletes the remaining pods with a grace period of 0.
 func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload, force bool) (bool, error) {
 	switch w.Kind {
@@ -232,6 +233,18 @@ func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace 
 	}
 
 	replicas, selector := replicasAndSelector(obj)
+	// Just after a scale-up patch, the cache can still show 0, so a live read confirms the 0.
+	// A patch that changes nothing still goes through admission, so the operator does not send it.
+	if ptr.Deref(replicas, 1) == 0 {
+		err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("get %s %s/%s: %w", w.Kind, namespace, w.Name, err)
+		}
+		replicas, selector = replicasAndSelector(obj)
+	}
 	if ptr.Deref(replicas, 1) != 0 {
 		err := retryOnce(func() error { return r.Client.Patch(ctx, obj, scaleToZero) })
 		if apierrors.IsNotFound(err) {
