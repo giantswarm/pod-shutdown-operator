@@ -20,7 +20,7 @@ The target downloads the tools and the envtest binaries into `bin/`. The test fi
 
 ## Run the end-to-end tests
 
-The end-to-end tests run the operator image in a `kind` cluster with one control-plane node and one worker. They use the Kubernetes API and the HTTP endpoint. They play the Flux controllers with Deployments of their own.
+The end-to-end tests run the operator image in a `kind` cluster with one control-plane node and one worker. They use the Kubernetes API and the HTTP endpoint. They play the Flux controllers with Deployments of their own. The tests cover a full shutdown and scale-up, the operator killed in the middle of a shutdown, two operator pods with leader election, and the forced delete with the StatefulSet delay.
 
     make test-e2e
 
@@ -31,3 +31,10 @@ The target builds the binary and the image, creates the cluster, loads the image
 The cluster stays after the tests, so a new run is faster. The kubeconfig is `bin/e2e/kubeconfig`. Delete the cluster with `make e2e-delete`.
 
 The test files have the build tag `e2e`, so `make test` and `make test-envtest` do not run them.
+
+## Do the manual tests before a release
+
+The automatic tests cannot cover all the behavior. A `kind` node shares the kernel of the host, so its boot ID does not change. `kind` also runs no KubeVirt. Do these tests on a lab node:
+
+1. **A real power pull.** Start a shutdown. Pull the power of all nodes in the middle of the shutdown. Restore the power. Make sure that the operator finds the new boot ID and scales the applications up from the record. Make sure that the `ShutdownRequest` reaches the phase `Restored`, and that the Flux controllers run again. Do the test again after a shutdown that reached `Complete`.
+2. **A Windows VM and the `Halted` flow.** List a Windows VM in a `ManagedApplication`. Start a shutdown. Make sure that the operator sets `runStrategy: Halted`, and that the guest shuts down cleanly inside its `gracePeriod`. Do the test again with a short `gracePeriod`, and make sure that the operator stops the VM by force with the `stop` subresource at the deadline. Cancel the shutdown, and make sure that the VM gets its old `runStrategy` back and starts.
