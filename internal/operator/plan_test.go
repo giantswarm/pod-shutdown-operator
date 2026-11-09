@@ -105,6 +105,8 @@ var _ = Describe("A ShutdownPlan", func() {
 		setDependsOn(ns, "frontend", "database")
 		setGracePeriod(ns, "frontend", 10*time.Second)
 		setGracePeriod(ns, "database", 20*time.Second)
+		// The pod template of the CronJob keeps the default of 30s, so only the skip of CronJobs gives no finding.
+		setGracePeriod(ns, "reports", 45*time.Second)
 
 		status := createPlan()
 
