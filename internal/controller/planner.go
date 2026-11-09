@@ -18,7 +18,7 @@ import (
 const maxDepth = 3
 
 // planner reads the cluster and plans a shutdown. It cannot change an object: it holds a reader,
-// and a writer that sends each write as a server-side dry run.
+// and only the ShutdownPlan reconciler also sets a writer that sends each write as a server-side dry run.
 type planner struct {
 	reader          client.Reader
 	fluxControllers []types.NamespacedName

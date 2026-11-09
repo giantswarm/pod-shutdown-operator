@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -65,11 +66,11 @@ func (p planner) patchFindings(ctx context.Context, record *shutdownv1alpha1.Rec
 		switch {
 		case isRejected(err):
 			finding.Reason = shutdownv1alpha1.ReasonPatchRejected
-			finding.Message = fmt.Sprintf("The API server rejected the dry run of %s: %v.", what, err)
+			finding.Message = fmt.Sprintf("The API server rejected the dry run of %s: %s.", what, errText(err))
 		case isServerError(err):
 			// For example, an admission webhook that fails. It can fail at each later plan too.
 			finding.Reason = shutdownv1alpha1.ReasonPatchFailed
-			finding.Message = fmt.Sprintf("The dry run of %s failed with a server error: %v.", what, err)
+			finding.Message = fmt.Sprintf("The dry run of %s failed with a server error: %s.", what, errText(err))
 			finding.Fallback = failedFallback
 		default:
 			// A later plan can avoid the other errors: no response, a timeout, a conflict, too many requests.
@@ -367,7 +368,12 @@ func (p planner) bootIDFindings() []shutdownv1alpha1.Finding {
 	return []shutdownv1alpha1.Finding{{
 		Severity: shutdownv1alpha1.SeverityError,
 		Reason:   shutdownv1alpha1.ReasonUnreadableBootID,
-		Message:  fmt.Sprintf("The operator cannot get its boot ID: %v.", err),
+		Message:  fmt.Sprintf("The operator cannot get its boot ID: %s.", errText(err)),
 		Fallback: "Count each operator restart during a shutdown as a power cycle, and scale up from the record.",
 	}}
+}
+
+// errText returns the text of an error with no period at the end, so that a message can add its own.
+func errText(err error) string {
+	return strings.TrimSuffix(err.Error(), ".")
 }

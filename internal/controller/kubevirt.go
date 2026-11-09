@@ -196,8 +196,8 @@ func (r *ShutdownRequestReconciler) stopVM(ctx context.Context, namespace, name 
 		return true, nil
 	}
 	err = retryOnce(func() error { return r.VirtualMachines.Stop(ctx, namespace, name, 0) })
-	// KubeVirt returns a Conflict when the VM does not run. An older KubeVirt also does this after it sets
-	// the VMI grace period to 0. A new read of the VMI tells if the stop is in effect.
+	// KubeVirt returns a Conflict when the VM does not run. It also returns a Conflict for a Halted VM when
+	// the VMI grace period is already 0, for example from the VM template. A new read of the VMI tells if the stop is in effect.
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
 		vmi, getErr := r.planner().runningVMI(ctx, namespace, name)
 		if getErr == nil && (vmi == nil || forceStopped(vmi)) {
