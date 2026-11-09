@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: do not halt a RerunOnFailure VM whose VMI is already in deletion
 - fix: read the VM terminationGracePeriodSeconds from the running VMI
 - fix: show complete in GET /progress only after the boot ID check of the current leader
+- fix: remove the double period from the finding messages, and correct the stop and start comments
 
 
 [Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
