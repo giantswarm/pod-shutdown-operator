@@ -96,7 +96,7 @@
             "properties": {
                 "existingSecret": {
                     "type": "string",
-                    "description": "The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`. Empty means that the chart creates the Secret from `api.token`."
+                    "description": "The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`. Empty means that the chart creates the Secret."
                 },
                 "nodePort": {
                     "type": "integer",
@@ -104,7 +104,7 @@
                 },
                 "token": {
                     "type": "string",
-                    "description": "The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty."
+                    "description": "The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty. Use at least 32 random bytes, for example from `openssl rand -base64 32`. Empty means that the chart keeps the token of the existing Secret, or generates a token from 32 random bytes."
                 }
             }
         },

@@ -7,7 +7,7 @@ Each step links to the document with the details.
    It tells the phases of a shutdown, the time budget, and the scale-up.
 2. Install the chart.
    Refer to [Install](install.md).
-   Set `api.token`, or set `api.existingSecret`.
+   The chart generates the token, or you set `api.token` or `api.existingSecret`.
 3. Write a `ManagedApplication` for each application.
    Refer to [Resources](resources.md#managedapplication).
    Set `dependsOn`, so that an application stops before its dependencies.

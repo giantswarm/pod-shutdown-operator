@@ -16,8 +16,8 @@ A Kubernetes operator that stops applications in dependency order before a clust
 | image.tag | string | `""` | The image tag. Empty means the appVersion of the chart. |
 | registry.domain | string | `"gsoci.azurecr.io"` |  |
 | replicas | int | `1` | The number of operator pods. Only the holder of the leader election lease acts. |
-| api.existingSecret | string | `""` | The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`. Empty means that the chart creates the Secret from `api.token`. |
-| api.token | string | `""` | The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty. |
+| api.existingSecret | string | `""` | The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`. Empty means that the chart creates the Secret. |
+| api.token | string | `""` | The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty. Use at least 32 random bytes, for example from `openssl rand -base64 32`. Empty means that the chart keeps the token of the existing Secret, or generates a token from 32 random bytes. |
 | api.nodePort | int | `30082` | The node port of the HTTP endpoint. The callers send their calls to this port on a node. |
 | operator.fluxControllers | list | `["flux-system/kustomize-controller","flux-system/helm-controller"]` | The Flux controller Deployments, as namespace/name. The operator scales them to 0 before it stops an application. An empty list disables the Flux step. |
 | operator.fluxStopTimeout | string | `"30s"` | The longest time that the shutdown waits for the pods of the Flux controllers to end. |
