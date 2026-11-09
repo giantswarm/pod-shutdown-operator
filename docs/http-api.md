@@ -4,6 +4,8 @@ Every operator pod serves the endpoint.
 The chart exposes it on the node port `api.nodePort` (default `30082`) of each node.
 The endpoint uses plain HTTP, so the token goes over the network in clear text.
 Keep the node addresses in a trusted network.
+The endpoint has no rate limit, because a limit lets any client block `POST /shutdown` during a power failure.
+Thus use a token of at least 32 random bytes, so that nobody can guess it.
 
 The binary flags are `--api-bind-address` (default `:8082`, empty disables the endpoint) and `--api-token-file`.
 The operator reads the token file at each call, so a new token needs no restart.

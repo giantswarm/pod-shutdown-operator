@@ -17,9 +17,11 @@ replicas: 1
 
 api:
   # -- The name of an existing Secret that holds the token of the HTTP endpoint in the key `token`.
-  # Empty means that the chart creates the Secret from `api.token`.
+  # Empty means that the chart creates the Secret.
   existingSecret: ""
   # -- The token of the HTTP endpoint. The chart uses it only when `api.existingSecret` is empty.
+  # Use at least 32 random bytes, for example from `openssl rand -base64 32`.
+  # Empty means that the chart keeps the token of the existing Secret, or generates a token from 32 random bytes.
   token: ""
   # -- The node port of the HTTP endpoint. The callers send their calls to this port on a node.
   nodePort: 30082

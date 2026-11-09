@@ -7,7 +7,11 @@ It installs the CRDs, the operator Deployment, the RBAC, the token Secret, and a
   It then stays alive to the end of the shutdown.
 - The operator never stops its own Deployment, also when a `ManagedApplication` lists it.
   Its only dependency in the cluster is the API server.
-- Set `api.token`, or set `api.existingSecret` to the name of a Secret with the key `token`.
+- With no `api.token` and no `api.existingSecret`, the chart generates a token from 32 random bytes.
+  An upgrade keeps the token of the existing Secret.
+  A tool that renders the chart with no cluster connection, for example `helm template`, generates a new token at each render.
+  With such a tool, set `api.token`, or set `api.existingSecret` to the name of a Secret with the key `token`.
+- A token that you set must have at least 32 random bytes, for example from `openssl rand -base64 32`.
 - With `replicas` above 1, only the holder of the leader election Lease acts.
 
 ## Main values
