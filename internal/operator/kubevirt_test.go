@@ -358,8 +358,8 @@ var _ = Describe("KubeVirt VirtualMachines", func() {
 	})
 
 	It("counts a VM as stopped when the forced stop returns a Conflict and the VMI has a grace period of 0", func() {
-		// An older KubeVirt returns a Conflict for a grace period of 0 when the VMI value is unset,
-		// after it sets the VMI value to 0.
+		// KubeVirt returns a Conflict for a Halted VM when the VMI grace period is already 0,
+		// for example from the VM template. The halt is then in effect with a grace period of 0.
 		actions.setStopErr(apierrors.NewConflict(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachine"}, "vm",
 			errors.New("Halted only supports manual stop requests with a shorter graceperiod")))
 		createVM(ns, "vm", map[string]any{"runStrategy": "Always"})

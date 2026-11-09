@@ -188,8 +188,8 @@ func (r *ShutdownRequestReconciler) continueShutdown(ctx context.Context, reques
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil
 }
 
-// stopApplication scales the workloads of an application to 0. It returns true when no pod of them remains.
-// With force, it deletes the remaining pods with a grace period of 0.
+// stopApplication stops the workloads of an application. It returns true when each of them is stopped.
+// With force, it ends the remaining pods and VMs with a grace period of 0.
 func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication, force bool) (bool, error) {
 	stopped := true
 	var errs []error
@@ -209,9 +209,11 @@ func (r *ShutdownRequestReconciler) stopApplication(ctx context.Context, app shu
 	return stopped, nil
 }
 
-// stopWorkload scales a workload to 0. It returns true when no pod of the workload remains.
+// stopWorkload scales a Deployment or StatefulSet to 0, halts a VM, or suspends a CronJob.
+// It returns true when no pod or VMI remains. For a CronJob, it returns true when the suspend succeeds,
+// and the Jobs that run keep their pods.
 // When the cache shows 0 replicas, a live read confirms the 0 before the operator skips the patch.
-// With force, it deletes the remaining pods with a grace period of 0.
+// With force, it ends the remaining pods and VMs with a grace period of 0, and then counts them as ended.
 func (r *ShutdownRequestReconciler) stopWorkload(ctx context.Context, namespace string, w shutdownv1alpha1.RecordedWorkload, force bool) (bool, error) {
 	switch w.Kind {
 	case shutdownv1alpha1.WorkloadKindVirtualMachine:

@@ -169,7 +169,7 @@ func (r *ShutdownRequestReconciler) continueScaleUp(ctx context.Context, request
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil
 }
 
-// startApplication scales the workloads of an application to their recorded counts.
+// startApplication restores the workloads of an application to their recorded state.
 // It returns true when all of them are ready. After an error, it tries the other workloads,
 // and then it returns false with the joined errors.
 func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app shutdownv1alpha1.RecordedApplication) (bool, error) {
@@ -190,7 +190,9 @@ func (r *ShutdownRequestReconciler) startApplication(ctx context.Context, app sh
 	return ready, nil
 }
 
-// startWorkload scales a workload to its recorded count. It returns true when the workload is ready.
+// startWorkload scales a Deployment or StatefulSet to its recorded count, restores the recorded field of a VM,
+// or restores the recorded suspend value of a CronJob. It returns true when the workload is ready.
+// A VM that did not run at the shutdown, and a CronJob after the patch, count as ready.
 // A workload that no longer exists counts as ready. A StatefulSet waits for StatefulSetScaleUpDelay
 // after a forced delete of its pods, because the old container can still run and hold the volume.
 // It sends the patch at each check and reads readiness from the response, not from the cache.
