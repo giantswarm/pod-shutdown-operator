@@ -80,4 +80,30 @@ var _ = Describe("CronJobs", func() {
 		Expect(suspendOf(paused)()).To(BeTrue())
 		Expect(getRequest().Status.Degraded).To(BeEmpty())
 	})
+
+	It("restores a suspended CronJob after a cancel in ShuttingDown", func() {
+		report := createCronJob(ns, "report", false)
+		paused := createCronJob(ns, "paused", true)
+		createApplication(ns, "jobs",
+			workload(shutdownv1alpha1.WorkloadKindCronJob, "report"),
+			workload(shutdownv1alpha1.WorkloadKindCronJob, "paused"),
+		)
+		// A pod of web keeps the shutdown in ShuttingDown after the suspend.
+		web := createDeployment(ns, "web", 2)
+		createPod(ns, "web-0", appLabels("web"))
+		createApplication(ns, "frontend", workload(shutdownv1alpha1.WorkloadKindDeployment, "web"))
+
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+		Eventually(suspendOf(report)).Should(BeTrue())
+		Expect(phaseOf()).To(Equal(shutdownv1alpha1.PhaseShuttingDown))
+
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(suspendOf(report)).Should(BeFalse())
+		Expect(suspendOf(paused)()).To(BeTrue())
+		Eventually(replicasOf(web)).Should(Equal(int32(2)))
+		markReady(web, 2)
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(getRequest().Status.Degraded).To(BeEmpty())
+	})
 })

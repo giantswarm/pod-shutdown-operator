@@ -141,6 +141,19 @@ func setVMReady(ns, name string) {
 	}).Should(Succeed())
 }
 
+// setVMStartRequest adds a start request to the status of a VM, in the place of KubeVirt after a start
+// whose VMI does not exist yet.
+func setVMStartRequest(ns, name string) {
+	Eventually(func() error {
+		vm := newKubeVirtObject("VirtualMachine", ns, name)
+		if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(vm), vm); err != nil {
+			return err
+		}
+		vm.Object["status"] = map[string]any{"stateChangeRequests": []any{map[string]any{"action": "Start"}}}
+		return k8sClient.Status().Update(ctx, vm)
+	}).Should(Succeed())
+}
+
 // vmSpecOf returns a function that reads the spec of a VM.
 func vmSpecOf(ns, name string) func() map[string]any {
 	return func() map[string]any {
@@ -342,6 +355,30 @@ var _ = Describe("KubeVirt VirtualMachines", func() {
 		Expect(getRequest().Status.Failed).To(BeEmpty())
 	})
 
+	It("halts an Always VM whose VMI is in a final phase, with no forced stop", func() {
+		createVM(ns, "done", map[string]any{"runStrategy": "Always"})
+		createVMI(ns, "done")
+		setVMIPhase(ns, "done", "Succeeded")
+		createVM(ns, "crashed", map[string]any{"runStrategy": "Always"})
+		createVMI(ns, "crashed")
+		setVMIPhase(ns, "crashed", "Failed")
+		createApplication(ns, "vms", vmWorkload("done"), vmWorkload("crashed"))
+
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+
+		// A VMI in a final phase has no running guest, so the VM counts as stopped at once.
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+		Expect(getRequest().Status.RecordedState.Applications[0].Workloads).To(Equal([]shutdownv1alpha1.RecordedWorkload{
+			{Kind: shutdownv1alpha1.WorkloadKindVirtualMachine, Name: "done", RunStrategy: ptr.To("Always")},
+			{Kind: shutdownv1alpha1.WorkloadKindVirtualMachine, Name: "crashed", RunStrategy: ptr.To("Always")},
+		}))
+		// The halt keeps KubeVirt from a new VMI during the shutdown.
+		Expect(vmSpecOf(ns, "done")()).To(Equal(map[string]any{"runStrategy": "Halted"}))
+		Expect(vmSpecOf(ns, "crashed")()).To(Equal(map[string]any{"runStrategy": "Halted"}))
+		Expect(getRequest().Status.Failed).To(BeEmpty())
+		Expect(actions.callsOf()).To(BeEmpty())
+	})
+
 	It("counts a VM as stopped when its VMI ends before the deadline", func() {
 		createVM(ns, "vm", map[string]any{"runStrategy": "Always"})
 		createVMI(ns, "vm")
@@ -434,6 +471,30 @@ var _ = Describe("KubeVirt VirtualMachines", func() {
 		// The VMI exists after the first start, so the operator does not call start again.
 		Expect(actions.callsOf()).To(Equal([]vmCall{{Subresource: "start", Key: ns + "/manual-on"}}))
 		Expect(vmiExists(ns, "manual-off")()).To(BeFalse())
+	})
+
+	It("does not start a Manual VM while an earlier start request waits for its VMI", func() {
+		createVM(ns, "manual-on", map[string]any{"runStrategy": "Manual"})
+		createVMI(ns, "manual-on")
+		createApplication(ns, "vms", vmWorkload("manual-on"))
+		createShutdownRequest(shutdownv1alpha1.ActionShutdown)
+		Eventually(vmSpecOf(ns, "manual-on")).Should(Equal(map[string]any{"runStrategy": "Halted"}))
+		deleteVMI(ns, "manual-on")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseComplete))
+		// For example, a user started the VM after the shutdown.
+		setVMStartRequest(ns, "manual-on")
+
+		setAction(shutdownv1alpha1.ActionCancel)
+
+		Eventually(vmSpecOf(ns, "manual-on")).Should(Equal(map[string]any{"runStrategy": "Manual"}))
+		Consistently(actions.callsOf, time.Second).Should(BeEmpty())
+		Expect(phaseOf()).To(Equal(shutdownv1alpha1.PhaseScalingUp))
+
+		// KubeVirt creates the VMI of the earlier start, and replaces the request with the Ready condition.
+		createVMI(ns, "manual-on")
+		setVMReady(ns, "manual-on")
+		Eventually(phaseOf).Should(Equal(shutdownv1alpha1.PhaseRestored))
+		Expect(actions.callsOf()).To(BeEmpty())
 	})
 
 	It("starts a RerunOnFailure VM that ran through the start subresource", func() {
