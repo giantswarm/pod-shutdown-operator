@@ -1,9 +1,12 @@
 # Install
 
-The Helm chart is in `helm/pod-shutdown-operator`. It installs the CRDs, the operator Deployment, the RBAC, the token Secret, and a `NodePort` service for the HTTP endpoint.
+The Helm chart is in `helm/pod-shutdown-operator`.
+It installs the CRDs, the operator Deployment, the RBAC, the token Secret, and a `NodePort` service for the HTTP endpoint.
 
-- The operator runs on a control-plane node, with the PriorityClass `system-cluster-critical`. It then stays alive to the end of the shutdown.
-- The operator never stops its own Deployment, also when a `ManagedApplication` lists it. Its only dependency in the cluster is the API server.
+- The operator runs on a control-plane node, with the PriorityClass `system-cluster-critical`.
+  It then stays alive to the end of the shutdown.
+- The operator never stops its own Deployment, also when a `ManagedApplication` lists it.
+  Its only dependency in the cluster is the API server.
 - Set `api.token`, or set `api.existingSecret` to the name of a Secret with the key `token`.
 - With `replicas` above 1, only the holder of the leader election Lease acts.
 

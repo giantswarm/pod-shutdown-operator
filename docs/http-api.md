@@ -1,8 +1,13 @@
 # HTTP API
 
-Every operator pod serves the endpoint. The chart exposes it on the node port `api.nodePort` (default `30082`) of each node. The endpoint uses plain HTTP, so the token goes over the network in clear text. Keep the node addresses in a trusted network.
+Every operator pod serves the endpoint.
+The chart exposes it on the node port `api.nodePort` (default `30082`) of each node.
+The endpoint uses plain HTTP, so the token goes over the network in clear text.
+Keep the node addresses in a trusted network.
 
-The binary flags are `--api-bind-address` (default `:8082`, empty disables the endpoint) and `--api-token-file`. The operator reads the token file at each call, so a new token needs no restart. With no readable token, the endpoint refuses each call that needs a token.
+The binary flags are `--api-bind-address` (default `:8082`, empty disables the endpoint) and `--api-token-file`.
+The operator reads the token file at each call, so a new token needs no restart.
+With no readable token, the endpoint refuses each call that needs a token.
 
 ## Calls
 
@@ -54,12 +59,20 @@ When two calls come before the leader acts, the last call wins.
 
 ### complete
 
-`complete` is true only in the phase `Complete`, and only after the current leader has checked that no power cycle occurred since the shutdown. After an operator start or a leader change, `complete` is false until the new leader has done this check. The leader writes its identity to `status.bootCheckedBy` when the check finds no power cycle. `complete` is true when this identity is equal to the holder of the leader election Lease. With leader election off, only the pod that did the check shows `complete` as true.
+`complete` is true only in the phase `Complete`, and only after the current leader has checked that no power cycle occurred since the shutdown.
+After an operator start or a leader change, `complete` is false until the new leader has done this check.
+The leader writes its identity to `status.bootCheckedBy` when the check finds no power cycle.
+`complete` is true when this identity is equal to the holder of the leader election Lease.
+With leader election off, only the pod that did the check shows `complete` as true.
 
 Use `complete`, not `phase`, to decide when to power off the nodes.
 
 ## Call again after a power-on
 
-When the cluster powers on with a request that is not `Restored`, the leader finds the power cycle at its first reconcile. It then sets the action `Cancel`. A `POST /shutdown` that comes before this check is lost, but it still returns `202`. A mains supply that fails again soon after a power-on can cause this.
+When the cluster powers on with a request that is not `Restored`, the leader finds the power cycle at its first reconcile.
+It then sets the action `Cancel`.
+A `POST /shutdown` that comes before this check is lost, but it still returns `202`.
+A mains supply that fails again soon after a power-on can cause this.
 
-After a `POST /shutdown`, read `GET /progress` until `complete` is true. If the phase changes to `ScalingUp` or `Restored`, send `POST /shutdown` again.
+After a `POST /shutdown`, read `GET /progress` until `complete` is true.
+If the phase changes to `ScalingUp` or `Restored`, send `POST /shutdown` again.

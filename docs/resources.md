@@ -4,7 +4,8 @@ All resources are in the API group `shutdown.giantswarm.io/v1alpha1`.
 
 ## ManagedApplication
 
-Namespaced. Each application team writes one for each application.
+Namespaced.
+Each application team writes one for each application.
 
 | Field | Default | Description |
 |---|---|---|
@@ -13,11 +14,15 @@ Namespaced. Each application team writes one for each application.
 | `spec.gracePeriod` | `30s` | The time that the application gets to stop. |
 | `spec.readyTimeout` | `5m` | The time that the application gets to become ready at scale-up. |
 
-Make the `terminationGracePeriodSeconds` of the pods equal to the `gracePeriod`. A `ShutdownPlan` shows a warning for a difference.
+Make the `terminationGracePeriodSeconds` of the pods equal to the `gracePeriod`.
+A `ShutdownPlan` shows a warning for a difference.
 
 ## ShutdownRequest
 
-Cluster-scoped. The only valid name is `cluster`. The HTTP endpoint writes it. Refer to [How it works](how-it-works.md).
+Cluster-scoped.
+The only valid name is `cluster`.
+The HTTP endpoint writes it.
+Refer to [How it works](how-it-works.md).
 
 | Field | Default | Description |
 |---|---|---|
@@ -32,7 +37,10 @@ Cluster-scoped. The only valid name is `cluster`. The HTTP endpoint writes it. R
 
 ## ShutdownPlan
 
-Cluster-scoped. A dry run of a shutdown. The operator writes the plan once into the status and changes nothing in the cluster. It deletes the `ShutdownPlan` after `shutdownPlanTTL` (default `1h`).
+Cluster-scoped.
+A dry run of a shutdown.
+The operator writes the plan once into the status and changes nothing in the cluster.
+It deletes the `ShutdownPlan` after `shutdownPlanTTL` (default `1h`).
 
 ```sh
 kubectl create -f - <<EOF
@@ -44,11 +52,16 @@ EOF
 kubectl get shutdownplan check --output jsonpath='{.status.report}'
 ```
 
-When a shutdown is active, the plan uses its record and budget. Else it uses the live state and the default budget.
+When a shutdown is active, the plan uses its record and budget.
+Else it uses the live state and the default budget.
 
-The plan uses the permissions of the operator. A user who can create and read a `ShutdownPlan` sees the names of all running Deployments, StatefulSets, and VMs in the cluster. `status.unmanaged` of the `ShutdownRequest` shows the same list. Give these rights only to cluster administrators.
+The plan uses the permissions of the operator.
+A user who can create and read a `ShutdownPlan` sees the names of all running Deployments, StatefulSets, and VMs in the cluster.
+`status.unmanaged` of the `ShutdownRequest` shows the same list.
+Give these rights only to cluster administrators.
 
-`status.result` is `OK`, `Warnings`, or `Errors`. Each item in `status.findings` has a `reason`:
+`status.result` is `OK`, `Warnings`, or `Errors`.
+Each item in `status.findings` has a `reason`:
 
 | Reason | Severity | Cause |
 |---|---|---|
@@ -63,4 +76,5 @@ The plan uses the permissions of the operator. A user who can create and read a 
 | `UnmanagedWorkload` | Warning | A running workload that no `ManagedApplication` lists. |
 | `TerminationGracePeriodLonger`, `TerminationGracePeriodShorter` | Warning | The `terminationGracePeriodSeconds` of a workload is not equal to the `gracePeriod` of its application. |
 
-Each finding has a `fallback` field. It tells what a real shutdown does with the problem.
+Each finding has a `fallback` field.
+It tells what a real shutdown does with the problem.

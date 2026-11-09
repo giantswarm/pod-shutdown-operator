@@ -1,6 +1,7 @@
 # pod-shutdown-operator
 
-A Kubernetes operator which scales down workloads when it receives a trigger via an API endpoint. Used for safely scaling workloads down before a cluster shutdown.
+A Kubernetes operator which scales down workloads when it receives a trigger via an API endpoint.
+Used for safely scaling workloads down before a cluster shutdown.
 
 - The operator stops applications in dependency order: an application stops after the applications that depend on it.
 - All stops fit in a time budget before the node power-off.
@@ -30,4 +31,5 @@ spec:
 
 ## Documents
 
-Refer to [docs](docs/README.md).
+Start with [Getting started](docs/getting-started.md).
+Refer to [docs](docs/README.md) for all documents.

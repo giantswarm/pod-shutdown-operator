@@ -1,5 +1,6 @@
 # Documents
 
+- [Getting started](getting-started.md): the steps to read the docs and use the operator, in order.
 - [How it works](how-it-works.md): the shutdown, the time budget, the scale-up, and the power cycle check.
 - [Resources](resources.md): `ManagedApplication`, `ShutdownRequest`, and `ShutdownPlan`.
 - [HTTP API](http-api.md): the calls, the responses, the phase rules, and the progress fields.
