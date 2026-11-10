@@ -345,12 +345,13 @@ func (p planner) unmanaged(ctx context.Context) ([]shutdownv1alpha1.UnmanagedWor
 	return unmanaged, nil
 }
 
-// unmanagedFindings returns a Warning for each unmanaged workload.
+// unmanagedFindings returns an Info finding for each unmanaged workload.
+// System workloads are always unmanaged, so a Warning would give the result Warnings on each cluster.
 func unmanagedFindings(unmanaged []shutdownv1alpha1.UnmanagedWorkload) []shutdownv1alpha1.Finding {
 	var findings []shutdownv1alpha1.Finding
 	for _, w := range unmanaged {
 		findings = append(findings, shutdownv1alpha1.Finding{
-			Severity: shutdownv1alpha1.SeverityWarning,
+			Severity: shutdownv1alpha1.SeverityInfo,
 			Reason:   shutdownv1alpha1.ReasonUnmanagedWorkload,
 			Message:  fmt.Sprintf("%s %s runs, but no ManagedApplication lists it.", w.Kind, appKey(w.Namespace, w.Name)),
 			Fallback: "Do not stop the workload. It runs until the node power-off.",

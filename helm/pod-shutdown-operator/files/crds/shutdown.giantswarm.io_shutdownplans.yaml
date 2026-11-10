@@ -80,6 +80,7 @@ spec:
                       enum:
                       - Error
                       - Warning
+                      - Info
                       type: string
                   required:
                   - fallback
@@ -210,7 +211,7 @@ spec:
                 type: string
               result:
                 description: PlanResult is the worst severity of the findings of a
-                  ShutdownPlan.
+                  ShutdownPlan. An Info finding does not change it.
                 enum:
                 - OK
                 - Warnings
