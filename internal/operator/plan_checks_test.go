@@ -210,7 +210,7 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 		Expect(status.Report).To(ContainSubstring("PatchFailed"))
 	})
 
-	It("reports each unlisted workload that runs as a Warning, but not a Flux controller", func() {
+	It("reports each unlisted workload that runs as Info, but not a Flux controller, and keeps the result OK", func() {
 		fluxNS := newNamespace()
 		DeferCleanup(cleanUp, fluxNS)
 		createDeployment(fluxNS, "kustomize-controller", 1)
@@ -239,10 +239,11 @@ var _ = Describe("The cluster checks of a ShutdownPlan", func() {
 
 		status := createPlan()
 
-		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultWarnings))
+		// System workloads are always unmanaged, so their findings must not change the result.
+		Expect(status.Result).To(Equal(shutdownv1alpha1.PlanResultOK))
 		unmanaged := findingsWith(status, shutdownv1alpha1.ReasonUnmanagedWorkload)
 		Expect(unmanaged).To(HaveEach(SatisfyAll(
-			HaveField("Severity", shutdownv1alpha1.SeverityWarning),
+			HaveField("Severity", shutdownv1alpha1.SeverityInfo),
 			HaveField("Applications", BeEmpty()),
 		)))
 		Expect(unmanaged).To(ConsistOf(

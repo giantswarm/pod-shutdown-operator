@@ -316,14 +316,16 @@ func (p planner) missingFindings(ctx context.Context, recorded []shutdownv1alpha
 	return findings, nil
 }
 
-// result returns the worst severity of the findings.
+// result returns the worst severity of the findings. An Info finding does not change it.
 func result(findings []shutdownv1alpha1.Finding) shutdownv1alpha1.PlanResult {
 	res := shutdownv1alpha1.PlanResultOK
 	for _, f := range findings {
-		if f.Severity == shutdownv1alpha1.SeverityError {
+		switch f.Severity {
+		case shutdownv1alpha1.SeverityError:
 			return shutdownv1alpha1.PlanResultErrors
+		case shutdownv1alpha1.SeverityWarning:
+			res = shutdownv1alpha1.PlanResultWarnings
 		}
-		res = shutdownv1alpha1.PlanResultWarnings
 	}
 	return res
 }

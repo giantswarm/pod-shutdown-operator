@@ -5,7 +5,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// PlanResult is the worst severity of the findings of a ShutdownPlan.
+// PlanResult is the worst severity of the findings of a ShutdownPlan. An Info finding does not change it.
 // +kubebuilder:validation:Enum=OK;Warnings;Errors
 type PlanResult string
 
@@ -16,12 +16,13 @@ const (
 )
 
 // Severity is the severity of a finding.
-// +kubebuilder:validation:Enum=Error;Warning
+// +kubebuilder:validation:Enum=Error;Warning;Info
 type Severity string
 
 const (
 	SeverityError   Severity = "Error"
 	SeverityWarning Severity = "Warning"
+	SeverityInfo    Severity = "Info"
 )
 
 // The reasons of the findings.

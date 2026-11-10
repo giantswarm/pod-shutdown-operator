@@ -61,6 +61,7 @@ A user who can create and read a `ShutdownPlan` sees the names of all running De
 Give these rights only to cluster administrators.
 
 `status.result` is `OK`, `Warnings`, or `Errors`.
+It is the worst severity of the findings. An `Info` finding does not change it.
 Each item in `status.findings` has a `reason`:
 
 | Reason | Severity | Cause |
@@ -73,8 +74,8 @@ Each item in `status.findings` has a `reason`:
 | `PatchRejected`, `PatchFailed` | Error | The API server rejected or failed a dry-run stop patch, for example because of RBAC or admission. |
 | `UnreadableBootID` | Error | The operator cannot read the boot ID of its node. |
 | `GracePeriodShrink` | Warning | The longest chain of a group does not fit in the budget. |
-| `UnmanagedWorkload` | Warning | A running workload that no `ManagedApplication` lists. |
 | `TerminationGracePeriodLonger`, `TerminationGracePeriodShorter` | Warning | The `terminationGracePeriodSeconds` of a workload is not equal to the `gracePeriod` of its application. |
+| `UnmanagedWorkload` | Info | A running workload that no `ManagedApplication` lists. System workloads, for example in `kube-system`, are always in this list. |
 
 Each finding has a `fallback` field.
 It tells what a real shutdown does with the problem.
