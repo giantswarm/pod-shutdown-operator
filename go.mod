@@ -1,4 +1,4 @@
-module github.com/giantswarm/pod-shutdown-operator
+module gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator
 
 go 1.26.0
 

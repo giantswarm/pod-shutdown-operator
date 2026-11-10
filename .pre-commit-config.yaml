@@ -51,7 +51,7 @@ repos:
           - --max-same-issues=0
           - --max-issues-per-linter=0
       - id: go-imports
-        args: [ -local, github.com/giantswarm/pod-shutdown-operator ]
+        args: [ -local, gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator ]
 
   # Helm chart schema: verify that helm/pod-shutdown-operator/values.schema.json is up to date.
   # The hook installs the pinned generator, writes the schema to a temporary file, and compares the two files.

@@ -25,7 +25,7 @@ E2E_ARCH ?= $(shell go env GOARCH)
 .PHONY: generate
 generate: $(CONTROLLER_GEN) $(GOIMPORTS) ## Generate the DeepCopy methods of the API types.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	"$(GOIMPORTS)" -local github.com/giantswarm/pod-shutdown-operator -w api/v1alpha1/zz_generated.deepcopy.go
+	"$(GOIMPORTS)" -local gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator -w api/v1alpha1/zz_generated.deepcopy.go
 
 # The Helm chart reads the CRDs and the rules of the ClusterRole from its files directory.
 .PHONY: manifests
