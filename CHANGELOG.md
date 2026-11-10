@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: show the clock assumption of the stale rule in the log, the help, and the docs
 - feat: report unmanaged workloads as Info, so that a ShutdownPlan can show OK
 
+### Removed
+
+- chore: remove the Giant Swarm tooling for the move to GitLab
+
 ### Fixed
 
 - fix: try each Flux controller and requeue at the poll interval after a failed Flux start
@@ -37,4 +41,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: remove the double period from the finding messages, and correct the stop and start comments
 
 
-[Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
+[Unreleased]: https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/-/tree/main

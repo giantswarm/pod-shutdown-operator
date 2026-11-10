@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
-	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/operator"
 )
 
 // scaleUpStartedAt waits for the start of the scale-up and returns status.scaleUpStartedAt.

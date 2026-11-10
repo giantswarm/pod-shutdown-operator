@@ -8,7 +8,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
 )
 
 // recordFlux returns the replicas of each configured Flux controller that exists.

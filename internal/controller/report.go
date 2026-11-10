@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
 )
 
 // report returns the plan as text, with the findings under each application.

@@ -21,8 +21,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
-	"github.com/giantswarm/pod-shutdown-operator/internal/api"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/api"
 )
 
 const image = "gsoci.azurecr.io/giantswarm/busybox:1.37.0"

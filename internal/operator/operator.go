@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/giantswarm/pod-shutdown-operator/internal/api"
-	"github.com/giantswarm/pod-shutdown-operator/internal/controller"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/api"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/controller"
 )
 
 // inClusterNamespacePath holds the namespace of the pod. controller-runtime reads the same file.

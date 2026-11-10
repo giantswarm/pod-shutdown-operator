@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/operator"
 )
 
 const (

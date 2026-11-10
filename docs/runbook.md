@@ -1,7 +1,7 @@
 # Runbook for pod-shutdown-operator
 
 This runbook is for the platform engineers of a cluster that runs the operator.
-The commands use the namespace `giantswarm`.
+The commands use the namespace `pod-shutdown-operator`.
 Use the namespace of your installation.
 
 ## Call the HTTP endpoint
@@ -14,7 +14,7 @@ Get the token.
 Give it to the callers at setup.
 The callers do not read the Secret.
 
-    kubectl --namespace giantswarm get secret pod-shutdown-operator-api-token --output jsonpath='{.data.token}' | base64 -d
+    kubectl --namespace pod-shutdown-operator get secret pod-shutdown-operator-api-token --output jsonpath='{.data.token}' | base64 -d
 
 When you set `api.existingSecret`, use the name of that Secret.
 
@@ -57,7 +57,7 @@ It scales up on purpose, because a wrong guess the other way keeps the cluster a
 The log of the new leader then shows the message `Found a power cycle, scales up from the record` with an empty `recordedBootID`.
 The empty value shows that the record had no entry for the node:
 
-    kubectl --namespace giantswarm logs --selector app.kubernetes.io/name=pod-shutdown-operator --tail -1 | grep 'Found a power cycle'
+    kubectl --namespace pod-shutdown-operator logs --selector app.kubernetes.io/name=pod-shutdown-operator --tail -1 | grep 'Found a power cycle'
 
 Do these steps:
 
@@ -82,7 +82,7 @@ Do these steps to scale the Flux controllers back by hand:
 1. Check the operator pods.
    Use this procedure only when the operator cannot run:
 
-        kubectl --namespace giantswarm get pods --selector app.kubernetes.io/name=pod-shutdown-operator
+        kubectl --namespace pod-shutdown-operator get pods --selector app.kubernetes.io/name=pod-shutdown-operator
 
 2. Scale each Flux controller to the replica count in the record:
 

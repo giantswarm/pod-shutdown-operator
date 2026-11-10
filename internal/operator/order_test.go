@@ -8,8 +8,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
-	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/operator"
 )
 
 var _ = Describe("The dependency order", func() {

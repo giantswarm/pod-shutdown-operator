@@ -25,7 +25,6 @@ app: {{ include "name" . | quote }}
 {{ include "labels.selector" . }}
 app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
 helm.sh/chart: {{ include "chart" . | quote }}
 {{- end -}}
 

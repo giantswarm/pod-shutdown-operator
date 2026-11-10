@@ -2,11 +2,11 @@
 
 A Kubernetes operator that stops applications in dependency order before a cluster shutdown, and restores them at power-on.
 
-**Homepage:** <https://github.com/giantswarm/pod-shutdown-operator>
+**Homepage:** <https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator>
 
 ## Source Code
 
-* <https://github.com/giantswarm/pod-shutdown-operator>
+* <https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator>
 
 ## Values
 
@@ -32,7 +32,3 @@ A Kubernetes operator that stops applications in dependency order before a clust
 | resources.requests.cpu | string | `"50m"` |  |
 | resources.requests.memory | string | `"64Mi"` |  |
 | resources.limits.memory | string | `"256Mi"` |  |
-
-## CI values
-
-`ci/ci-values.yaml` holds the values the CI render (`helm template` in app-build-suite) needs beyond the defaults, such as a `required` value without a default.

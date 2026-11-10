@@ -1,6 +1,3 @@
-# The repository owns this file: devctl creates it when it is missing and
-# afterwards only adds the linters it requires (gosec, goconst) to
-# linters.enable when they are neither enabled nor disabled.
 version: "2"
 
 linters:

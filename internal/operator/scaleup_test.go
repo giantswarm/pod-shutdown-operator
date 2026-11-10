@@ -11,8 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	shutdownv1alpha1 "github.com/giantswarm/pod-shutdown-operator/api/v1alpha1"
-	"github.com/giantswarm/pod-shutdown-operator/internal/operator"
+	shutdownv1alpha1 "gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/api/v1alpha1"
+	"gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/internal/operator"
 )
 
 var _ = Describe("A scale-up from the record", func() {
