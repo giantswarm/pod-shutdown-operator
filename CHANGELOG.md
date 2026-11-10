@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - feat: show the clock assumption of the stale rule in the log, the help, and the docs
 - feat: report unmanaged workloads as Info, so that a ShutdownPlan can show OK
 
+### Removed
+
+- chore: remove the Giant Swarm tooling for the move to GitLab
+
 ### Fixed
 
 - fix: try each Flux controller and requeue at the poll interval after a failed Flux start
