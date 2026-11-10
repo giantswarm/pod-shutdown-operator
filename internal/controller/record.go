@@ -109,7 +109,9 @@ func (r *ShutdownRequestReconciler) markStale(ctx context.Context, request *shut
 	if err := r.Client.Status().Update(ctx, updated); err != nil {
 		return fmt.Errorf("mark the request stale: %w", err)
 	}
-	ctrl.LoggerFrom(ctx).Info("Found a request with no phase after the stale limit, changes nothing", "createdAt", request.CreationTimestamp)
+	// The creation time comes from the API server clock, and now from the operator node clock. The two values show a clock skew.
+	ctrl.LoggerFrom(ctx).Info("Found a request with no phase after the stale limit, changes nothing",
+		"createdAt", request.CreationTimestamp, "now", r.Clock.Now())
 	return nil
 }
 

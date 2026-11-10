@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: return the Node list error at record time, and keep the stale check until a request passes it
 - docs: keep a missing own boot ID entry as a power cycle, and tell what to do in the runbook
 - feat: generate the API token from 32 random bytes in the chart
+- feat: show the clock assumption of the stale rule in the log, the help, and the docs
 
 ### Fixed
 

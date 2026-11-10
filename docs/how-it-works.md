@@ -79,3 +79,10 @@ The operator then sets the action `Cancel`, and the scale-up starts with no call
 
 The operator also does this when the record has no entry for its node.
 Refer to the [runbook](runbook.md#start-a-shutdown-again-after-a-false-power-cycle).
+
+A request with no phase has no record, so the boot ID check skips it.
+The stale rule applies instead: a request older than `staleLimit` (default `5m`) ends as `Restored` with the reason `Stale`, and changes nothing.
+The rule compares the operator node clock with the `creationTimestamp` from the API server clock.
+A clock skew between the two can make an old request look new, or a new request look stale.
+The log of a stale request shows both times.
+A power cycle shorter than `staleLimit` does not make a request with no phase stale.
