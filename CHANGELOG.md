@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: keep a missing own boot ID entry as a power cycle, and tell what to do in the runbook
 - feat: generate the API token from 32 random bytes in the chart
 - feat: show the clock assumption of the stale rule in the log, the help, and the docs
+- feat: report unmanaged workloads as Info, so that a ShutdownPlan can show OK
 
 ### Fixed
 
