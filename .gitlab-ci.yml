@@ -1,0 +1,63 @@
+# The pipeline runs the tests for each merge request and for each push to the default branch.
+# It builds and publishes no image and no chart.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+stages:
+  - test
+
+variables:
+  GO_IMAGE: golang:1.26
+  HELM_VERSION: v4.3.0
+  KUBECTL_VERSION: v1.37.0
+
+lint:
+  stage: test
+  image: golangci/golangci-lint:v2.15.0
+  script:
+    - golangci-lint run ./...
+
+unit:
+  stage: test
+  image: $GO_IMAGE
+  script:
+    - make test
+
+envtest:
+  stage: test
+  image: $GO_IMAGE
+  timeout: 20m
+  script:
+    - make generate manifests
+    - |
+      if [ -n "$(git status --porcelain)" ]; then
+        git status --porcelain
+        git diff
+        echo "Run 'make generate manifests' and commit the result."
+        exit 1
+      fi
+    - make test-envtest
+
+# kind maps the NodePort of the HTTP endpoint and the API server to 127.0.0.1, so Docker must run in the job container.
+# The job needs a runner that starts its containers in privileged mode.
+e2e:
+  stage: test
+  image: $GO_IMAGE
+  timeout: 40m
+  before_script:
+    - apt-get update && apt-get install --yes --no-install-recommends docker.io
+    - dockerd > /tmp/dockerd.log 2>&1 &
+    - timeout 60 sh -c 'until docker info > /dev/null 2>&1; do sleep 1; done' || { cat /tmp/dockerd.log; exit 1; }
+    - curl --fail --silent --show-error --location "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar --extract --gzip --strip-components 1 --directory /usr/local/bin linux-amd64/helm
+    - curl --fail --silent --show-error --location --output /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    - chmod +x /usr/local/bin/kubectl
+  script:
+    # The operator logs help to find the cause of a failed test.
+    - |
+      make test-e2e || {
+        kubectl --kubeconfig bin/e2e/kubeconfig --namespace pod-shutdown-operator \
+          logs --selector app.kubernetes.io/name=pod-shutdown-operator --prefix --tail -1
+        exit 1
+      }
