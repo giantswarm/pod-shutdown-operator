@@ -2,11 +2,11 @@
 
 A Kubernetes operator that stops applications in dependency order before a cluster shutdown, and restores them at power-on.
 
-**Homepage:** <https://github.com/giantswarm/pod-shutdown-operator>
+**Homepage:** <https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator>
 
 ## Source Code
 
-* <https://github.com/giantswarm/pod-shutdown-operator>
+* <https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator>
 
 ## Values
 

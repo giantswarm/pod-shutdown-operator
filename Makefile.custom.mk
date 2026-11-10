@@ -21,7 +21,7 @@ E2E_DIR ?= $(LOCALBIN)/e2e
 E2E_IMAGE ?= gsoci.azurecr.io/giantswarm/pod-shutdown-operator:e2e
 E2E_ARCH ?= $(shell go env GOARCH)
 
-# The go-build job in CircleCI checks every Go file with goimports, also the generated files.
+# The go-imports pre-commit hook checks every Go file, also the generated files.
 .PHONY: generate
 generate: $(CONTROLLER_GEN) $(GOIMPORTS) ## Generate the DeepCopy methods of the API types.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt" paths="./..."

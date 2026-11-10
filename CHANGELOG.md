@@ -37,4 +37,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix: remove the double period from the finding messages, and correct the stop and start comments
 
 
-[Unreleased]: https://github.com/giantswarm/pod-shutdown-operator/tree/main
+[Unreleased]: https://gitlab.opendefense.cloud/odc/shutdown-op/pod-shutdown-operator/-/tree/main
