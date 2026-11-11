@@ -1,4 +1,11 @@
-include Makefile.*.mk
+# DO NOT EDIT. Generated with:
+#
+#    devctl
+#
+#    https://github.com/giantswarm/devctl/blob/1db8df846716412f82889c81256ff31c9acf2638/pkg/gen/input/makefile/internal/file/Makefile.template
+#
+
+-include Makefile.*.mk
 
 ##@ General
 
@@ -16,22 +23,3 @@ include Makefile.*.mk
 .PHONY: help
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; n = 0; w = 0} /^[a-zA-Z%\\\/_0-9-]+:.*?##/ { order[n] = "t"; targets[n] = $$1; descs[n] = $$2; if (length($$1) > w) w = length($$1); n++ } /^##@/ { order[n] = "c"; cats[n] = substr($$0, 5); n++ } END { printf "\nUsage:\n  make \033[36m<target>\033[0m\n"; for (i = 0; i < n; i++) { if (order[i] == "c") printf "\n\033[1m%s\033[0m\n", cats[i]; else printf "  \033[36m%-*s\033[0m  %s\n", w, targets[i], descs[i] } }' $(MAKEFILE_LIST)
-
-##@ Go
-
-.DEFAULT_GOAL := build
-
-# The race detector needs a C toolchain, so the tests run without it when there is none.
-RACE := $(shell { [ "$${CGO_ENABLED:-1}" != "0" ] && { command -v gcc || command -v clang; } >/dev/null 2>&1; } && echo -race)
-
-.PHONY: build
-build: ## Build the binary into bin/.
-	go build -o bin/pod-shutdown-operator .
-
-.PHONY: lint
-lint: ## Run golangci-lint.
-	golangci-lint run ./...
-
-.PHONY: test
-test: ## Run the unit tests.
-	go test $(RACE) ./...

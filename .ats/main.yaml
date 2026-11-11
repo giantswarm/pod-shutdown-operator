@@ -1,0 +1,3 @@
+# Created by devctl gen circleci. This file is repository-owned.
+# Add ATS tests and remove their scenario names from skip-steps to enable them.
+skip-steps: [smoke, functional, upgrade]
